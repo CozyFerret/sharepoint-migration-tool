@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+sharepoint_migration_tool\test_sharepoint_data
+C:\Dev\sharepoint_migration_tool\test_sharepoint_data
 # C extensions
 *.so
 

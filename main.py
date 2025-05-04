@@ -101,6 +101,23 @@ def main():
             
             # Create and show main window
             main_window = MainWindow()
+            
+            # Apply data flow fixes from the DataFlowFixes module
+            try:
+                from data_flow_fixes import modify_main_window
+                modify_main_window(main_window)
+                logging.info("Applied data flow fixes to MainWindow")
+            except Exception as e:
+                logging.error(f"Failed to apply data flow fixes: {e}")
+            
+            # Apply view enhancements
+            try:
+                from file_analysis_enhancements import apply_view_enhancements
+                apply_view_enhancements(main_window)
+                logging.info("Applied view enhancements")
+            except Exception as e:
+                logging.error(f"Failed to apply view enhancements: {e}")
+            
             logging.info("Main window created successfully")
             main_window.show()
             

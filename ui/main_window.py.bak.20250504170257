@@ -1,0 +1,2865 @@
+"""
+Main window for the SharePoint Migration Tool.
+This file contains the primary UI class for the application.
+"""
+
+import os
+import sys
+import logging
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QLabel, QFileDialog, QTabWidget, QProgressBar, QMessageBox,
+    QLineEdit, QComboBox, QCheckBox, QGroupBox, QRadioButton,
+    QTableView, QSplitter, QTextEdit
+)
+from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtGui import QIcon, QFont
+
+# Import core components
+try:
+    from core.data_processor import DataProcessor
+    logger = logging.getLogger('sharepoint_migration_tool')
+    logger.info("Successfully imported DataProcessor")
+except ImportError as e:
+    logger = logging.getLogger('sharepoint_migration_tool')
+    logger.error(f"Error importing DataProcessor: {e}")
+    
+    # Create a simple dialog to show the error
+    error_dialog = QMessageBox()
+    error_dialog.setIcon(QMessageBox.Critical)
+    error_dialog.setText("Import Error")
+    error_dialog.setInformativeText(f"Error importing core components: {e}")
+    error_dialog.setWindowTitle("Error")
+    error_dialog.exec_()
+
+class MainWindow(QMainWindow):
+    """Main window for the SharePoint Migration Tool"""
+    
+    def __init__(self):
+        """Initialize the main window"""
+        super().__init__()
+        try:
+            # Initialize the data processor
+            self.data_processor = DataProcessor()
+            
+            # Initialize UI
+            self.init_ui()
+            
+            # Set window properties
+            self.setWindowTitle("SharePoint Migration Tool")
+            self.setGeometry(100, 100, 1200, 800)
+            
+            logger.info("Main window initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing main window: {e}")
+            # Display error message
+            QMessageBox.critical(self, "Initialization Error", 
+                                f"Failed to initialize application: {str(e)}")
+    
+    def init_ui(self):
+        """Initialize the user interface"""
+        try:
+            # Create central widget and layout
+            central_widget = QWidget()
+            main_layout = QVBoxLayout(central_widget)
+            
+            # Add a log text edit at the bottom for debugging
+            self.log_text = QTextEdit()
+            self.log_text.setReadOnly(True)
+            self.log_text.setMaximumHeight(150)
+            self.log_text.setPlaceholderText("Application log will appear here...")
+            
+            # Setup custom handler for the logger
+            class QTextEditLogger(logging.Handler):
+                def __init__(self, text_edit):
+                    super().__init__()
+                    self.text_edit = text_edit
+                    self.text_edit.ensureCursorVisible()
+                    
+                def emit(self, record):
+                    msg = self.format(record)
+                    self.text_edit.append(msg)
+                    
+            # Add custom handler
+            log_handler = QTextEditLogger(self.log_text)
+            log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s: %(message)s'))
+            logger.addHandler(log_handler)
+            
+            # Create tab widget for different sections
+            self.tab_widget = QTabWidget()
+            
+            # Create tabs
+            self.scan_tab = self.create_scan_tab()
+            self.analyze_tab = self.create_analyze_tab()
+            self.clean_tab = self.create_clean_tab()
+            self.settings_tab = self.create_settings_tab()
+            
+            # Add tabs to widget
+            self.tab_widget.addTab(self.scan_tab, "Scan")
+            self.tab_widget.addTab(self.analyze_tab, "Analyze")
+            self.tab_widget.addTab(self.clean_tab, "Clean & Migrate")
+            self.tab_widget.addTab(self.settings_tab, "Settings")
+            
+            # Add tab widget to main layout
+            main_layout.addWidget(self.tab_widget)
+            
+            # Add log text to main layout
+            main_layout.addWidget(QLabel("Application Log:"))
+            main_layout.addWidget(self.log_text)
+            
+            # Set central widget
+            self.setCentralWidget(central_widget)
+            
+            logger.info("UI initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing UI: {e}")
+            # Display error message
+            QMessageBox.critical(self, "UI Initialization Error", 
+                                f"Failed to initialize UI: {str(e)}")
+    
+    def create_scan_tab(self):
+        """Create the scan tab"""
+        try:
+            # Create tab widget
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            
+            # Source folder selection
+            folder_layout = QHBoxLayout()
+            folder_layout.addWidget(QLabel("Source Folder:"))
+            
+            self.source_folder_edit = QLineEdit()
+            self.source_folder_edit.setReadOnly(True)
+            folder_layout.addWidget(self.source_folder_edit)
+            
+            self.browse_button = QPushButton("Browse...")
+            self.browse_button.clicked.connect(self.browse_source_folder)
+            folder_layout.addWidget(self.browse_button)
+            
+            layout.addLayout(folder_layout)
+            
+            # Scan options group
+            scan_options = QGroupBox("Scan Options")
+            scan_options_layout = QVBoxLayout(scan_options)
+            
+            self.recursive_checkbox = QCheckBox("Scan subfolders recursively")
+            self.recursive_checkbox.setChecked(True)
+            scan_options_layout.addWidget(self.recursive_checkbox)
+            
+            self.hidden_checkbox = QCheckBox("Include hidden files")
+            scan_options_layout.addWidget(self.hidden_checkbox)
+            
+            layout.addWidget(scan_options)
+            
+            # Scan controls
+            controls_layout = QHBoxLayout()
+            
+            self.scan_button = QPushButton("Scan Files")
+            self.scan_button.setEnabled(False)
+            self.scan_button.clicked.connect(self.start_scan)
+            controls_layout.addWidget(self.scan_button)
+            
+            self.stop_button = QPushButton("Stop Scan")
+            self.stop_button.setEnabled(False)
+            self.stop_button.clicked.connect(self.stop_scan)
+            controls_layout.addWidget(self.stop_button)
+            
+            layout.addLayout(controls_layout)
+            
+            # Progress bar
+            progress_layout = QVBoxLayout()
+            progress_layout.addWidget(QLabel("Scan Progress:"))
+            
+            self.scan_progress = QProgressBar()
+            progress_layout.addWidget(self.scan_progress)
+            
+            layout.addLayout(progress_layout)
+            
+            # Status label
+            self.scan_status = QLabel("Ready to scan")
+            layout.addWidget(self.scan_status)
+            
+            # Add spacer
+            layout.addStretch()
+            
+            return tab
+        except Exception as e:
+            logger.error(f"Error creating scan tab: {e}")
+            # Create an error tab
+            error_tab = QWidget()
+            error_layout = QVBoxLayout(error_tab)
+            error_layout.addWidget(QLabel(f"Error creating scan tab: {str(e)}"))
+            return error_tab
+    
+    def create_analyze_tab(self):
+    """Create the analyze tab with detailed analysis views"""
+    try:
+        # Create tab widget
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Import analyzer widget
+        try:
+            from ui.analyzer_widget import AnalyzerWidget
+            self.analyzer_widget = AnalyzerWidget()
+            layout.addWidget(self.analyzer_widget)
+            logger.info("Analyzer widget loaded successfully")
+        except ImportError as e:
+            logger.error(f"Error importing AnalyzerWidget: {e}")
+            # Fallback to simpler implementation if custom widget not available
+            self._create_fallback_analyze_tab(layout)
+        
+        return tab
+    except Exception as e:
+        logger.error(f"Error creating analyze tab: {e}")
+        # Create an error tab
+        error_tab = QWidget()
+        error_layout = QVBoxLayout(error_tab)
+        error_layout.addWidget(QLabel(f"Error creating analyze tab: {str(e)}"))
+        return error_tab
+    
+def _create_fallback_analyze_tab(self, layout):
+    """Create a fallback analyze tab if AnalyzerWidget is not available"""
+    # Create a splitter for resizable sections
+    splitter = QSplitter(Qt.Vertical)
+    
+    # --- Summary section ---
+    summary_group = QGroupBox("Scan Summary")
+    summary_layout = QVBoxLayout(summary_group)
+    
+    # Create data labels
+    self.total_files_label = QLabel("Total Files: 0")
+    self.total_folders_label = QLabel("Total Folders: 0")
+    self.total_size_label = QLabel("Total Size: 0 B")
+    self.total_issues_label = QLabel("Total Issues: 0")
+    
+    # Add to layout
+    summary_layout.addWidget(self.total_files_label)
+    summary_layout.addWidget(self.total_folders_label)
+    summary_layout.addWidget(self.total_size_label)
+    summary_layout.addWidget(self.total_issues_label)
+    
+    splitter.addWidget(summary_group)
+    
+    # --- Issue details section ---
+    issues_group = QGroupBox("Issues Found")
+    issues_layout = QVBoxLayout(issues_group)
+    
+    # Create table for issues
+    self.issues_table = QTableView()
+    self.issues_model = QStandardItemModel()
+    self.issues_model.setHorizontalHeaderLabels(["Issue Type", "Count", "Severity", "Description"])
+    self.issues_table.setModel(self.issues_model)
+    self.issues_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.issues_table.horizontalHeader().setStretchLastSection(True)
+    
+    issues_layout.addWidget(self.issues_table)
+    issues_group.setLayout(issues_layout)
+    splitter.addWidget(issues_group)
+    
+    # --- File issues section ---
+    files_group = QGroupBox("Files with Issues")
+    files_layout = QVBoxLayout(files_group)
+    
+    # Create table for files with issues
+    self.files_table = QTableView()
+    self.files_model = QStandardItemModel()
+    self.files_model.setHorizontalHeaderLabels(["Filename", "Path", "Issue Count", "Issue Types"])
+    self.files_table.setModel(self.files_model)
+    self.files_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.files_table.horizontalHeader().setStretchLastSection(True)
+    
+    files_layout.addWidget(self.files_table)
+    files_group.setLayout(files_layout)
+    splitter.addWidget(files_group)
+    
+    # Add analyze button for running custom analysis
+    button_layout = QHBoxLayout()
+    
+    self.analyze_button = QPushButton("Run Analysis")
+    self.analyze_button.clicked.connect(self.run_analysis)
+    button_layout.addWidget(self.analyze_button)
+    
+    self.export_analysis_button = QPushButton("Export Analysis")
+    self.export_analysis_button.clicked.connect(self.export_analysis)
+    self.export_analysis_button.setEnabled(False)
+    button_layout.addWidget(self.export_analysis_button)
+    
+    # Add splitter to layout
+    layout.addWidget(splitter)
+    layout.addLayout(button_layout)
+
+def run_analysis(self):
+    """Run analysis on the scanned data"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                              "No scan data available. Please scan files first.")
+            return
+        
+        # Enable export button
+        self.export_analysis_button.setEnabled(True)
+        
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        
+        # Update summary data
+        total_files = len(scan_data)
+        self.total_files_label.setText(f"Total Files: {total_files}")
+        
+        # Get folder count from scan_data (approximate)
+        total_folders = sum(1 for _, row in scan_data.iterrows() if row.get('is_folder', False))
+        self.total_folders_label.setText(f"Total Folders: {total_folders}")
+        
+        # Get total size from scan_data
+        total_size = sum(row.get('size', 0) for _, row in scan_data.iterrows())
+        size_text = self._format_size(total_size)
+        self.total_size_label.setText(f"Total Size: {size_text}")
+        
+        # Get total issues
+        total_issues = sum(len(issues) for issues in analysis_results.values() if isinstance(issues, (list, dict)))
+        self.total_issues_label.setText(f"Total Issues: {total_issues}")
+        
+        # Update issues table
+        self.issues_model.removeRows(0, self.issues_model.rowCount())
+        
+        issue_counts = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            count = len(issues)
+            issue_counts[issue_type] = count
+            
+            severity = "Critical" if issue_type in ["path_length", "reserved_names"] else "Warning"
+            description = self._get_issue_description(issue_type)
+            
+            row = [
+                QStandardItem(issue_type),
+                QStandardItem(str(count)),
+                QStandardItem(severity),
+                QStandardItem(description)
+            ]
+            
+            # Set color based on severity
+            if severity == "Critical":
+                row[2].setBackground(QColor(255, 200, 200))  # Light red
+            else:
+                row[2].setBackground(QColor(255, 255, 200))  # Light yellow
+                
+            self.issues_model.appendRow(row)
+        
+        # Update files table
+        self.files_model.removeRows(0, self.files_model.rowCount())
+        
+        # Collect files with issues
+        files_with_issues = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            # Different issue types have different structures
+            if issue_type == 'name_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Name Issue')
+            elif issue_type == 'path_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Path Length')
+            elif issue_type == 'duplicates':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Duplicate')
+            elif issue_type == 'pii':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('PII')
+        
+        # Add files to table
+        for path, info in files_with_issues.items():
+            filename = os.path.basename(path)
+            count = info['count']
+            types = ', '.join(info['types'])
+            
+            row = [
+                QStandardItem(filename),
+                QStandardItem(path),
+                QStandardItem(str(count)),
+                QStandardItem(types)
+            ]
+            
+            # Highlight row based on issue count
+            if count > 1:
+                for item in row:
+                    item.setBackground(QColor(255, 240, 240))  # Very light red
+            
+            self.files_model.appendRow(row)
+        
+        # If analyzer_widget exists, update it too
+        if hasattr(self, 'analyzer_widget'):
+            self.analyzer_widget.update_with_results(analysis_results)
+        
+    except Exception as e:
+        logger.error(f"Error running analysis: {e}")
+        QMessageBox.critical(self, "Analysis Error", 
+                           f"Error running analysis: {str(e)}")
+
+def _format_size(self, size_bytes):
+    """Format size in bytes to human-readable string"""
+    if size_bytes < 1024:
+        return f"{size_bytes} bytes"
+    elif size_bytes < 1024*1024:
+        return f"{size_bytes/1024:.1f} KB"
+    elif size_bytes < 1024*1024*1024:
+        return f"{size_bytes/(1024*1024):.1f} MB"
+    else:
+        return f"{size_bytes/(1024*1024*1024):.2f} GB"
+
+def _get_issue_description(self, issue_type):
+    """Get a description for an issue type"""
+    descriptions = {
+        'name_issues': 'Files with names that violate SharePoint naming rules',
+        'path_issues': 'Files with paths exceeding SharePoint\'s 256 character limit',
+        'duplicates': 'Files with identical content found in multiple locations',
+        'pii': 'Files potentially containing personally identifiable information',
+        'path_length': 'Files with paths exceeding SharePoint\'s 256 character limit',
+        'illegal_chars': 'Files with names containing characters not allowed in SharePoint',
+        'reserved_names': 'Files with names that match SharePoint reserved names',
+        'illegal_prefix': 'Files with names starting with illegal prefixes',
+        'illegal_suffix': 'Files with names ending with illegal suffixes'
+    }
+    
+    return descriptions.get(issue_type, 'General issue')
+
+def export_analysis(self):
+    """Export analysis results to a file"""
+    try:
+        # Check if we have analysis data
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Data", 
+                              "No analysis results available. Please run analysis first.")
+            return
+        
+        # Ask for save location
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Analysis Results",
+            "",
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;HTML Files (*.html);;Text Files (*.txt)"
+        )
+        
+        if not file_path:
+            return
+            
+        # Determine export format based on extension
+        export_format = os.path.splitext(file_path)[1].lower()
+        
+        # Create a report from analysis results
+        report_data = []
+        
+        # Add summary data
+        scan_data = self.data_processor.get_scan_data()
+        total_files = len(scan_data) if scan_data is not None else 0
+        
+        # Get folder count from scan_data (approximate)
+        total_folders = sum(1 for _, row in scan_data.iterrows() if row.get('is_folder', False)) if scan_data is not None else 0
+        
+        # Get total size from scan_data
+        total_size = sum(row.get('size', 0) for _, row in scan_data.iterrows()) if scan_data is not None else 0
+        size_text = self._format_size(total_size)
+        
+        # Get total issues
+        total_issues = sum(len(issues) for issues in analysis_results.values() if isinstance(issues, (list, dict)))
+        
+        # Add summary to report
+        report_data.append(["Summary", "", "", ""])
+        report_data.append(["Total Files", str(total_files), "", ""])
+        report_data.append(["Total Folders", str(total_folders), "", ""])
+        report_data.append(["Total Size", size_text, "", ""])
+        report_data.append(["Total Issues", str(total_issues), "", ""])
+        report_data.append(["", "", "", ""])  # Empty row
+        
+        # Add issue summary
+        report_data.append(["Issue Summary", "", "", ""])
+        report_data.append(["Issue Type", "Count", "Severity", "Description"])
+        
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            count = len(issues)
+            severity = "Critical" if issue_type in ["path_length", "reserved_names"] else "Warning"
+            description = self._get_issue_description(issue_type)
+            
+            report_data.append([issue_type, str(count), severity, description])
+        
+        report_data.append(["", "", "", ""])  # Empty row
+        
+        # Add files with issues
+        report_data.append(["Files with Issues", "", "", ""])
+        report_data.append(["Filename", "Path", "Issue Count", "Issue Types"])
+        
+        # Collect files with issues
+        files_with_issues = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            # Different issue types have different structures
+            if issue_type == 'name_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Name Issue')
+            elif issue_type == 'path_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Path Length')
+            elif issue_type == 'duplicates':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Duplicate')
+            elif issue_type == 'pii':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('PII')
+        
+        # Add files to report
+        for path, info in files_with_issues.items():
+            filename = os.path.basename(path)
+            count = info['count']
+            types = ', '.join(info['types'])
+            
+            report_data.append([filename, path, str(count), types])
+        
+        # Export data based on format
+        if export_format == '.csv':
+            import csv
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(report_data)
+        elif export_format == '.xlsx':
+            import pandas as pd
+            # Convert to DataFrame
+            df = pd.DataFrame(report_data)
+            df.to_excel(file_path, index=False, header=False)
+        elif export_format == '.html':
+            html = "<html><head><title>Analysis Report</title></head><body>"
+            html += "<h1>SharePoint Migration Analysis Report</h1>"
+            
+            # Add tables for each section
+            for i, row in enumerate(report_data):
+                if len(row) == 4 and row[0] and row[1] == "" and row[2] == "" and row[3] == "":
+                    # Section header
+                    html += f"<h2>{row[0]}</h2>"
+                    html += "<table border='1'>"
+                    # Next row is table header
+                    if i + 1 < len(report_data):
+                        html += "<tr>"
+                        for cell in report_data[i+1]:
+                            html += f"<th>{cell}</th>"
+                        html += "</tr>"
+                    # Subsequent rows until empty row
+                    for j in range(i+2, len(report_data)):
+                        if report_data[j][0] == "":
+                            break
+                        html += "<tr>"
+                        for cell in report_data[j]:
+                            html += f"<td>{cell}</td>"
+                        html += "</tr>"
+                    html += "</table>"
+            
+            html += "</body></html>"
+            
+            with open(file_path, 'w') as f:
+                f.write(html)
+        else:  # Text format
+            with open(file_path, 'w') as f:
+                for row in report_data:
+                    f.write('\t'.join(row) + '\n')
+        
+        QMessageBox.information(self, "Export Complete", 
+                              f"Analysis results exported to {file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error exporting analysis: {e}")
+        QMessageBox.critical(self, "Export Error", 
+                           f"Error exporting analysis: {str(e)}")
+    
+def _create_fallback_analyze_tab(self, layout):
+    """Create a fallback analyze tab if AnalyzerWidget is not available"""
+    # Create a splitter for resizable sections
+    splitter = QSplitter(Qt.Vertical)
+    
+    # --- Summary section ---
+    summary_group = QGroupBox("Scan Summary")
+    summary_layout = QVBoxLayout(summary_group)
+    
+    # Create data labels
+    self.total_files_label = QLabel("Total Files: 0")
+    self.total_folders_label = QLabel("Total Folders: 0")
+    self.total_size_label = QLabel("Total Size: 0 B")
+    self.total_issues_label = QLabel("Total Issues: 0")
+    
+    # Add to layout
+    summary_layout.addWidget(self.total_files_label)
+    summary_layout.addWidget(self.total_folders_label)
+    summary_layout.addWidget(self.total_size_label)
+    summary_layout.addWidget(self.total_issues_label)
+    
+    splitter.addWidget(summary_group)
+    
+    # --- Issue details section ---
+    issues_group = QGroupBox("Issues Found")
+    issues_layout = QVBoxLayout(issues_group)
+    
+    # Create table for issues
+    self.issues_table = QTableView()
+    self.issues_model = QStandardItemModel()
+    self.issues_model.setHorizontalHeaderLabels(["Issue Type", "Count", "Severity", "Description"])
+    self.issues_table.setModel(self.issues_model)
+    self.issues_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.issues_table.horizontalHeader().setStretchLastSection(True)
+    
+    issues_layout.addWidget(self.issues_table)
+    issues_group.setLayout(issues_layout)
+    splitter.addWidget(issues_group)
+    
+    # --- File issues section ---
+    files_group = QGroupBox("Files with Issues")
+    files_layout = QVBoxLayout(files_group)
+    
+    # Create table for files with issues
+    self.files_table = QTableView()
+    self.files_model = QStandardItemModel()
+    self.files_model.setHorizontalHeaderLabels(["Filename", "Path", "Issue Count", "Issue Types"])
+    self.files_table.setModel(self.files_model)
+    self.files_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.files_table.horizontalHeader().setStretchLastSection(True)
+    
+    files_layout.addWidget(self.files_table)
+    files_group.setLayout(files_layout)
+    splitter.addWidget(files_group)
+    
+    # Add analyze button for running custom analysis
+    button_layout = QHBoxLayout()
+    
+    self.analyze_button = QPushButton("Run Analysis")
+    self.analyze_button.clicked.connect(self.run_analysis)
+    button_layout.addWidget(self.analyze_button)
+    
+    self.export_analysis_button = QPushButton("Export Analysis")
+    self.export_analysis_button.clicked.connect(self.export_analysis)
+    self.export_analysis_button.setEnabled(False)
+    button_layout.addWidget(self.export_analysis_button)
+    
+    # Add splitter to layout
+    layout.addWidget(splitter)
+    layout.addLayout(button_layout)
+
+def run_analysis(self):
+    """Run analysis on the scanned data"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                              "No scan data available. Please scan files first.")
+            return
+        
+        # Enable export button
+        self.export_analysis_button.setEnabled(True)
+        
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        
+        # Update summary data
+        total_files = len(scan_data)
+        self.total_files_label.setText(f"Total Files: {total_files}")
+        
+        # Get folder count from scan_data (approximate)
+        total_folders = sum(1 for _, row in scan_data.iterrows() if row.get('is_folder', False))
+        self.total_folders_label.setText(f"Total Folders: {total_folders}")
+        
+        # Get total size from scan_data
+        total_size = sum(row.get('size', 0) for _, row in scan_data.iterrows())
+        size_text = self._format_size(total_size)
+        self.total_size_label.setText(f"Total Size: {size_text}")
+        
+        # Get total issues
+        total_issues = sum(len(issues) for issues in analysis_results.values() if isinstance(issues, (list, dict)))
+        self.total_issues_label.setText(f"Total Issues: {total_issues}")
+        
+        # Update issues table
+        self.issues_model.removeRows(0, self.issues_model.rowCount())
+        
+        issue_counts = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            count = len(issues)
+            issue_counts[issue_type] = count
+            
+            severity = "Critical" if issue_type in ["path_length", "reserved_names"] else "Warning"
+            description = self._get_issue_description(issue_type)
+            
+            row = [
+                QStandardItem(issue_type),
+                QStandardItem(str(count)),
+                QStandardItem(severity),
+                QStandardItem(description)
+            ]
+            
+            # Set color based on severity
+            if severity == "Critical":
+                row[2].setBackground(QColor(255, 200, 200))  # Light red
+            else:
+                row[2].setBackground(QColor(255, 255, 200))  # Light yellow
+                
+            self.issues_model.appendRow(row)
+        
+        # Update files table
+        self.files_model.removeRows(0, self.files_model.rowCount())
+        
+        # Collect files with issues
+        files_with_issues = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            # Different issue types have different structures
+            if issue_type == 'name_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Name Issue')
+            elif issue_type == 'path_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Path Length')
+            elif issue_type == 'duplicates':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Duplicate')
+            elif issue_type == 'pii':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('PII')
+        
+        # Add files to table
+        for path, info in files_with_issues.items():
+            filename = os.path.basename(path)
+            count = info['count']
+            types = ', '.join(info['types'])
+            
+            row = [
+                QStandardItem(filename),
+                QStandardItem(path),
+                QStandardItem(str(count)),
+                QStandardItem(types)
+            ]
+            
+            # Highlight row based on issue count
+            if count > 1:
+                for item in row:
+                    item.setBackground(QColor(255, 240, 240))  # Very light red
+            
+            self.files_model.appendRow(row)
+        
+        # If analyzer_widget exists, update it too
+        if hasattr(self, 'analyzer_widget'):
+            self.analyzer_widget.update_with_results(analysis_results)
+        
+    except Exception as e:
+        logger.error(f"Error running analysis: {e}")
+        QMessageBox.critical(self, "Analysis Error", 
+                           f"Error running analysis: {str(e)}")
+
+def _format_size(self, size_bytes):
+    """Format size in bytes to human-readable string"""
+    if size_bytes < 1024:
+        return f"{size_bytes} bytes"
+    elif size_bytes < 1024*1024:
+        return f"{size_bytes/1024:.1f} KB"
+    elif size_bytes < 1024*1024*1024:
+        return f"{size_bytes/(1024*1024):.1f} MB"
+    else:
+        return f"{size_bytes/(1024*1024*1024):.2f} GB"
+
+def _get_issue_description(self, issue_type):
+    """Get a description for an issue type"""
+    descriptions = {
+        'name_issues': 'Files with names that violate SharePoint naming rules',
+        'path_issues': 'Files with paths exceeding SharePoint\'s 256 character limit',
+        'duplicates': 'Files with identical content found in multiple locations',
+        'pii': 'Files potentially containing personally identifiable information',
+        'path_length': 'Files with paths exceeding SharePoint\'s 256 character limit',
+        'illegal_chars': 'Files with names containing characters not allowed in SharePoint',
+        'reserved_names': 'Files with names that match SharePoint reserved names',
+        'illegal_prefix': 'Files with names starting with illegal prefixes',
+        'illegal_suffix': 'Files with names ending with illegal suffixes'
+    }
+    
+    return descriptions.get(issue_type, 'General issue')
+
+def export_analysis(self):
+    """Export analysis results to a file"""
+    try:
+        # Check if we have analysis data
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Data", 
+                              "No analysis results available. Please run analysis first.")
+            return
+        
+        # Ask for save location
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Analysis Results",
+            "",
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;HTML Files (*.html);;Text Files (*.txt)"
+        )
+        
+        if not file_path:
+            return
+            
+        # Determine export format based on extension
+        export_format = os.path.splitext(file_path)[1].lower()
+        
+        # Create a report from analysis results
+        report_data = []
+        
+        # Add summary data
+        scan_data = self.data_processor.get_scan_data()
+        total_files = len(scan_data) if scan_data is not None else 0
+        
+        # Get folder count from scan_data (approximate)
+        total_folders = sum(1 for _, row in scan_data.iterrows() if row.get('is_folder', False)) if scan_data is not None else 0
+        
+        # Get total size from scan_data
+        total_size = sum(row.get('size', 0) for _, row in scan_data.iterrows()) if scan_data is not None else 0
+        size_text = self._format_size(total_size)
+        
+        # Get total issues
+        total_issues = sum(len(issues) for issues in analysis_results.values() if isinstance(issues, (list, dict)))
+        
+        # Add summary to report
+        report_data.append(["Summary", "", "", ""])
+        report_data.append(["Total Files", str(total_files), "", ""])
+        report_data.append(["Total Folders", str(total_folders), "", ""])
+        report_data.append(["Total Size", size_text, "", ""])
+        report_data.append(["Total Issues", str(total_issues), "", ""])
+        report_data.append(["", "", "", ""])  # Empty row
+        
+        # Add issue summary
+        report_data.append(["Issue Summary", "", "", ""])
+        report_data.append(["Issue Type", "Count", "Severity", "Description"])
+        
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            count = len(issues)
+            severity = "Critical" if issue_type in ["path_length", "reserved_names"] else "Warning"
+            description = self._get_issue_description(issue_type)
+            
+            report_data.append([issue_type, str(count), severity, description])
+        
+        report_data.append(["", "", "", ""])  # Empty row
+        
+        # Add files with issues
+        report_data.append(["Files with Issues", "", "", ""])
+        report_data.append(["Filename", "Path", "Issue Count", "Issue Types"])
+        
+        # Collect files with issues
+        files_with_issues = {}
+        for issue_type, issues in analysis_results.items():
+            if not isinstance(issues, (list, dict)) or not issues:
+                continue
+                
+            # Different issue types have different structures
+            if issue_type == 'name_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Name Issue')
+            elif issue_type == 'path_issues':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Path Length')
+            elif issue_type == 'duplicates':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('Duplicate')
+            elif issue_type == 'pii':
+                for _, row in issues.iterrows():
+                    path = row.get('path', '')
+                    if path:
+                        if path not in files_with_issues:
+                            files_with_issues[path] = {'count': 0, 'types': set()}
+                        files_with_issues[path]['count'] += 1
+                        files_with_issues[path]['types'].add('PII')
+        
+        # Add files to report
+        for path, info in files_with_issues.items():
+            filename = os.path.basename(path)
+            count = info['count']
+            types = ', '.join(info['types'])
+            
+            report_data.append([filename, path, str(count), types])
+        
+        # Export data based on format
+        if export_format == '.csv':
+            import csv
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(report_data)
+        elif export_format == '.xlsx':
+            import pandas as pd
+            # Convert to DataFrame
+            df = pd.DataFrame(report_data)
+            df.to_excel(file_path, index=False, header=False)
+        elif export_format == '.html':
+            html = "<html><head><title>Analysis Report</title></head><body>"
+            html += "<h1>SharePoint Migration Analysis Report</h1>"
+            
+            # Add tables for each section
+            for i, row in enumerate(report_data):
+                if len(row) == 4 and row[0] and row[1] == "" and row[2] == "" and row[3] == "":
+                    # Section header
+                    html += f"<h2>{row[0]}</h2>"
+                    html += "<table border='1'>"
+                    # Next row is table header
+                    if i + 1 < len(report_data):
+                        html += "<tr>"
+                        for cell in report_data[i+1]:
+                            html += f"<th>{cell}</th>"
+                        html += "</tr>"
+                    # Subsequent rows until empty row
+                    for j in range(i+2, len(report_data)):
+                        if report_data[j][0] == "":
+                            break
+                        html += "<tr>"
+                        for cell in report_data[j]:
+                            html += f"<td>{cell}</td>"
+                        html += "</tr>"
+                    html += "</table>"
+            
+            html += "</body></html>"
+            
+            with open(file_path, 'w') as f:
+                f.write(html)
+        else:  # Text format
+            with open(file_path, 'w') as f:
+                for row in report_data:
+                    f.write('\t'.join(row) + '\n')
+        
+        QMessageBox.information(self, "Export Complete", 
+                              f"Analysis results exported to {file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error exporting analysis: {e}")
+        QMessageBox.critical(self, "Export Error", 
+                           f"Error exporting analysis: {str(e)}")
+    
+    def create_clean_tab(self):
+    """Create the clean and migrate tab"""
+    try:
+        # Create tab widget
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Import cleanup widget
+        try:
+            from ui.cleanup_widget import CleanupWidget
+            self.cleanup_widget = CleanupWidget()
+            layout.addWidget(self.cleanup_widget)
+            logger.info("Cleanup widget loaded successfully")
+            
+            # Connect signals
+            if hasattr(self.cleanup_widget, 'fix_completed'):
+                self.cleanup_widget.fix_completed.connect(self.on_fix_completed)
+        except ImportError as e:
+            logger.error(f"Error importing CleanupWidget: {e}")
+            # Fallback to simpler implementation if custom widget not available
+            self._create_fallback_clean_tab(layout)
+        
+        return tab
+    except Exception as e:
+        logger.error(f"Error creating clean tab: {e}")
+        # Create an error tab
+        error_tab = QWidget()
+        error_layout = QVBoxLayout(error_tab)
+        error_layout.addWidget(QLabel(f"Error creating clean tab: {str(e)}"))
+        return error_tab
+
+def _create_fallback_clean_tab(self, layout):
+    """Create a fallback clean tab if CleanupWidget is not available"""
+    # Create a splitter for resizable sections
+    splitter = QSplitter(Qt.Vertical)
+    
+    # --- Options section ---
+    options_group = QGroupBox("Cleaning Options")
+    options_layout = QVBoxLayout(options_group)
+    
+    # Path length options
+    path_group = QGroupBox("Path Length Fixing")
+    path_layout = QVBoxLayout(path_group)
+    
+    self.fix_path_check = QCheckBox("Fix path length issues")
+    self.fix_path_check.setChecked(True)
+    path_layout.addWidget(self.fix_path_check)
+    
+    path_strategy_layout = QHBoxLayout()
+    path_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.path_strategy_combo = QComboBox()
+    self.path_strategy_combo.addItems([
+        "Abbreviate Directories", 
+        "Remove Middle Directories",
+        "Truncate Names",
+        "Minimal Path"
+    ])
+    path_strategy_layout.addWidget(self.path_strategy_combo)
+    path_layout.addLayout(path_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(path_group)
+    
+    # Name fixing options
+    name_group = QGroupBox("Name Fixing")
+    name_layout = QVBoxLayout(name_group)
+    
+    self.fix_name_check = QCheckBox("Fix illegal characters and reserved names")
+    self.fix_name_check.setChecked(True)
+    name_layout.addWidget(self.fix_name_check)
+    
+    name_strategy_layout = QHBoxLayout()
+    name_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.name_strategy_combo = QComboBox()
+    self.name_strategy_combo.addItems([
+        "Replace with Underscore",
+        "Remove Characters",
+        "Replace with ASCII Equivalents"
+    ])
+    name_strategy_layout.addWidget(self.name_strategy_combo)
+    name_layout.addLayout(name_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(name_group)
+    
+    # Duplicate options
+    dup_group = QGroupBox("Duplicate Handling")
+    dup_layout = QVBoxLayout(dup_group)
+    
+    self.fix_duplicates_check = QCheckBox("Handle duplicate files")
+    self.fix_duplicates_check.setChecked(True)
+    dup_layout.addWidget(self.fix_duplicates_check)
+    
+    dup_strategy_layout = QHBoxLayout()
+    dup_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.dup_strategy_combo = QComboBox()
+    self.dup_strategy_combo.addItems([
+        "Keep First Occurrence",
+        "Keep Newest Version",
+        "Keep Oldest Version",
+        "Keep Largest Version",
+        "Keep Smallest Version",
+        "Rename All Duplicates"
+    ])
+    dup_strategy_layout.addWidget(self.dup_strategy_combo)
+    dup_layout.addLayout(dup_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(dup_group)
+    
+    # Target selection
+    target_group = QGroupBox("Target Location")
+    target_layout = QHBoxLayout(target_group)
+    
+    self.target_path_edit = QLineEdit()
+    self.target_path_edit.setReadOnly(True)
+    self.target_path_edit.setPlaceholderText("Select output directory...")
+    
+    target_browse_btn = QPushButton("Browse...")
+    target_browse_btn.clicked.connect(self.select_target_folder)
+    
+    target_layout.addWidget(self.target_path_edit)
+    target_layout.addWidget(target_browse_btn)
+    
+    # Add to options layout
+    options_layout.addWidget(target_group)
+    
+    # Add options group to splitter
+    splitter.addWidget(options_group)
+    
+    # --- Preview section ---
+    preview_group = QGroupBox("Fix Preview")
+    preview_layout = QVBoxLayout(preview_group)
+    
+    self.preview_table = QTableView()
+    self.preview_model = QStandardItemModel()
+    self.preview_model.setHorizontalHeaderLabels(["Original Path", "New Path", "Issues Fixed"])
+    self.preview_table.setModel(self.preview_model)
+    self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.preview_table.horizontalHeader().setStretchLastSection(True)
+    
+    preview_layout.addWidget(self.preview_table)
+    
+    # Preview button
+    self.preview_button = QPushButton("Generate Preview")
+    self.preview_button.clicked.connect(self.generate_fix_preview)
+    preview_layout.addWidget(self.preview_button)
+    
+    # Add preview group to splitter
+    splitter.addWidget(preview_group)
+    
+    # Add splitter to layout
+    layout.addWidget(splitter)
+    
+    # --- Progress section ---
+    progress_group = QGroupBox("Fix Progress")
+    progress_layout = QVBoxLayout(progress_group)
+    
+    self.clean_progress_bar = QProgressBar()
+    progress_layout.addWidget(self.clean_progress_bar)
+    
+    # Status label
+    self.clean_status_label = QLabel("Ready to start fixing issues")
+    progress_layout.addWidget(self.clean_status_label)
+    
+    # Add to layout
+    layout.addWidget(progress_group)
+    
+    # --- Control buttons ---
+    button_layout = QHBoxLayout()
+    
+    self.start_fix_button = QPushButton("Start Fixing Issues")
+    self.start_fix_button.clicked.connect(self.start_fixing_issues)
+    self.start_fix_button.setEnabled(False)
+    
+    self.cancel_fix_button = QPushButton("Cancel")
+    self.cancel_fix_button.clicked.connect(self.cancel_fixing_issues)
+    self.cancel_fix_button.setEnabled(False)
+    
+    button_layout.addStretch()
+    button_layout.addWidget(self.start_fix_button)
+    button_layout.addWidget(self.cancel_fix_button)
+    button_layout.addStretch()
+    
+    # Add to layout
+    layout.addLayout(button_layout)
+
+def select_target_folder(self):
+    """Select target folder for cleaned files"""
+    try:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Target Folder", "", QFileDialog.ShowDirsOnly
+        )
+        
+        if folder:
+            self.target_path_edit.setText(folder)
+            self.start_fix_button.setEnabled(True)
+            
+            # If we have a cleanup widget, update it too
+            if hasattr(self, 'cleanup_widget'):
+                # Assuming the cleanup widget has a method to set the target folder
+                if hasattr(self.cleanup_widget, 'set_target_folder'):
+                    self.cleanup_widget.set_target_folder(folder)
+    except Exception as e:
+        logger.error(f"Error selecting target folder: {e}")
+        QMessageBox.critical(self, "Folder Selection Error", 
+                           f"Error selecting folder: {str(e)}")
+
+def generate_fix_preview(self):
+    """Generate a preview of the fixes that will be applied"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                             "No scan data available. Please scan files first.")
+            return
+            
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Analysis", 
+                             "No analysis results available. Please run analysis first.")
+            return
+            
+        # Check if target folder is selected
+        target_folder = self.target_path_edit.text()
+        if not target_folder:
+            QMessageBox.warning(self, "No Target", 
+                             "Please select a target folder for the fixed files.")
+            return
+            
+        # Get fix options
+        fix_options = {
+            'fix_path_issues': self.fix_path_check.isChecked(),
+            'path_strategy': self.path_strategy_combo.currentText(),
+            'fix_name_issues': self.fix_name_check.isChecked(),
+            'name_strategy': self.name_strategy_combo.currentText(),
+            'fix_duplicates': self.fix_duplicates_check.isChecked(),
+            'duplicate_strategy': self.dup_strategy_combo.currentText()
+        }
+        
+        # Create data cleaner
+        from core.data_cleaner import DataCleaner
+        cleaner = DataCleaner()
+        
+        # Generate preview
+        preview = cleaner.preview_fixes(analysis_results, fix_options)
+        
+        # Update preview table
+        self.preview_model.removeRows(0, self.preview_model.rowCount())
+        
+        # Add path fixes
+        for fix in preview.get('path_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem("Path Length")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Add name fixes
+        for fix in preview.get('name_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem("Naming Issues")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Add duplicate fixes
+        for fix in preview.get('duplicate_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            reference = fix.get('reference', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem(f"Duplicate of {os.path.basename(reference)}")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Enable start button
+        self.start_fix_button.setEnabled(True)
+        
+        # Update status
+        total_fixes = preview.get('total_fixes', 0)
+        self.clean_status_label.setText(f"Preview generated: {total_fixes} fixes to apply")
+        
+    except Exception as e:
+        logger.error(f"Error generating fix preview: {e}")
+        QMessageBox.critical(self, "Preview Error", 
+                           f"Error generating preview: {str(e)}")
+
+def start_fixing_issues(self):
+    """Start the fixing process"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                             "No scan data available. Please scan files first.")
+            return
+            
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Analysis", 
+                             "No analysis results available. Please run analysis first.")
+            return
+            
+        # Check if target folder is selected
+        target_folder = self.target_path_edit.text()
+        if not target_folder:
+            QMessageBox.warning(self, "No Target", 
+                             "Please select a target folder for the fixed files.")
+            return
+            
+        # Get fix options
+        clean_options = {
+            'fix_path_issues': self.fix_path_check.isChecked(),
+            'path_strategy': self.path_strategy_combo.currentText(),
+            'fix_name_issues': self.fix_name_check.isChecked(),
+            'name_strategy': self.name_strategy_combo.currentText(),
+            'fix_duplicates': self.fix_duplicates_check.isChecked(),
+            'duplicate_strategy': self.dup_strategy_combo.currentText(),
+            'source_folder': self.source_folder_edit.text()
+        }
+        
+        # Set up callbacks
+        callbacks = {
+            'progress': self.update_clean_progress,
+            'status': self.update_clean_status,
+            'error': self.clean_error,
+            'file_processed': self.file_processed,
+            'cleaning_completed': self.cleaning_completed
+        }
+        
+        # Disable UI
+        self.start_fix_button.setEnabled(False)
+        self.cancel_fix_button.setEnabled(True)
+        self.preview_button.setEnabled(False)
+        
+        # Reset progress
+        self.clean_progress_bar.setValue(0)
+        self.clean_status_label.setText("Starting cleanup...")
+        
+        # Start cleaning
+        self.data_processor.start_cleaning(target_folder, clean_options, callbacks)
+        
+    except Exception as e:
+        logger.error(f"Error starting cleanup: {e}")
+        QMessageBox.critical(self, "Cleanup Error", 
+                           f"Error starting cleanup: {str(e)}")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+
+def cancel_fixing_issues(self):
+    """Cancel the fixing process"""
+    try:
+        # Stop cleaning
+        self.data_processor.stop_cleaning()
+        
+        # Update status
+        self.clean_status_label.setText("Cleanup cancelled")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+    except Exception as e:
+        logger.error(f"Error cancelling cleanup: {e}")
+        QMessageBox.critical(self, "Cancel Error", 
+                           f"Error cancelling cleanup: {str(e)}")
+
+def update_clean_progress(self, current, total):
+    """Update the cleanup progress bar"""
+    try:
+        progress = int((current / max(total, 1)) * 100)
+        self.clean_progress_bar.setValue(progress)
+        
+    except Exception as e:
+        logger.error(f"Error updating cleanup progress: {e}")
+
+def update_clean_status(self, status):
+    """Update the cleanup status label"""
+    try:
+        self.clean_status_label.setText(status)
+        
+    except Exception as e:
+        logger.error(f"Error updating cleanup status: {e}")
+
+def clean_error(self, error_msg):
+    """Handle cleanup error"""
+    try:
+        logger.error(f"Cleanup error: {error_msg}")
+        
+        # Update status
+        self.clean_status_label.setText(f"Error: {error_msg}")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+        # Show error message
+        QMessageBox.critical(self, "Cleanup Error", 
+                           f"Error during cleanup: {error_msg}")
+        
+    except Exception as e:
+        logger.error(f"Error handling cleanup error: {e}")
+
+def file_processed(self, original_path, processed_path):
+    """Handle file processed callback"""
+    try:
+        # Update status with latest file
+        filename = os.path.basename(original_path)
+        self.clean_status_label.setText(f"Processed: {filename}")
+        
+    except Exception as e:
+        logger.error(f"Error handling file processed: {e}")
+
+def cleaning_completed(self, cleaned_files):
+    """Handle cleanup completion"""
+    try:
+        # Update status
+        total_files = len(cleaned_files) if cleaned_files else 0
+        self.clean_status_label.setText(f"Cleanup completed: {total_files} files processed")
+        
+        # Set progress to 100%
+        self.clean_progress_bar.setValue(100)
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+        # Show success message
+        QMessageBox.information(self, "Cleanup Complete", 
+                              f"Cleanup completed successfully. {total_files} files processed.")
+        
+    except Exception as e:
+        logger.error(f"Error handling cleanup completion: {e}")
+
+def on_fix_completed(self, results):
+    """Handle fix completion from the cleanup widget"""
+    try:
+        # Update UI
+        self.clean_progress_bar.setValue(100)
+        
+        # Show success message
+        total_fixed = results.get('total_fixed', 0)
+        QMessageBox.information(self, "Fixes Complete", 
+                              f"Fixed {total_fixed} issues successfully.")
+        
+    except Exception as e:
+        logger.error(f"Error handling fix completion: {e}")
+
+def _create_fallback_clean_tab(self, layout):
+    """Create a fallback clean tab if CleanupWidget is not available"""
+    # Create a splitter for resizable sections
+    splitter = QSplitter(Qt.Vertical)
+    
+    # --- Options section ---
+    options_group = QGroupBox("Cleaning Options")
+    options_layout = QVBoxLayout(options_group)
+    
+    # Path length options
+    path_group = QGroupBox("Path Length Fixing")
+    path_layout = QVBoxLayout(path_group)
+    
+    self.fix_path_check = QCheckBox("Fix path length issues")
+    self.fix_path_check.setChecked(True)
+    path_layout.addWidget(self.fix_path_check)
+    
+    path_strategy_layout = QHBoxLayout()
+    path_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.path_strategy_combo = QComboBox()
+    self.path_strategy_combo.addItems([
+        "Abbreviate Directories", 
+        "Remove Middle Directories",
+        "Truncate Names",
+        "Minimal Path"
+    ])
+    path_strategy_layout.addWidget(self.path_strategy_combo)
+    path_layout.addLayout(path_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(path_group)
+    
+    # Name fixing options
+    name_group = QGroupBox("Name Fixing")
+    name_layout = QVBoxLayout(name_group)
+    
+    self.fix_name_check = QCheckBox("Fix illegal characters and reserved names")
+    self.fix_name_check.setChecked(True)
+    name_layout.addWidget(self.fix_name_check)
+    
+    name_strategy_layout = QHBoxLayout()
+    name_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.name_strategy_combo = QComboBox()
+    self.name_strategy_combo.addItems([
+        "Replace with Underscore",
+        "Remove Characters",
+        "Replace with ASCII Equivalents"
+    ])
+    name_strategy_layout.addWidget(self.name_strategy_combo)
+    name_layout.addLayout(name_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(name_group)
+    
+    # Duplicate options
+    dup_group = QGroupBox("Duplicate Handling")
+    dup_layout = QVBoxLayout(dup_group)
+    
+    self.fix_duplicates_check = QCheckBox("Handle duplicate files")
+    self.fix_duplicates_check.setChecked(True)
+    dup_layout.addWidget(self.fix_duplicates_check)
+    
+    dup_strategy_layout = QHBoxLayout()
+    dup_strategy_layout.addWidget(QLabel("Strategy:"))
+    
+    self.dup_strategy_combo = QComboBox()
+    self.dup_strategy_combo.addItems([
+        "Keep First Occurrence",
+        "Keep Newest Version",
+        "Keep Oldest Version",
+        "Keep Largest Version",
+        "Keep Smallest Version",
+        "Rename All Duplicates"
+    ])
+    dup_strategy_layout.addWidget(self.dup_strategy_combo)
+    dup_layout.addLayout(dup_strategy_layout)
+    
+    # Add to options layout
+    options_layout.addWidget(dup_group)
+    
+    # Target selection
+    target_group = QGroupBox("Target Location")
+    target_layout = QHBoxLayout(target_group)
+    
+    self.target_path_edit = QLineEdit()
+    self.target_path_edit.setReadOnly(True)
+    self.target_path_edit.setPlaceholderText("Select output directory...")
+    
+    target_browse_btn = QPushButton("Browse...")
+    target_browse_btn.clicked.connect(self.select_target_folder)
+    
+    target_layout.addWidget(self.target_path_edit)
+    target_layout.addWidget(target_browse_btn)
+    
+    # Add to options layout
+    options_layout.addWidget(target_group)
+    
+    # Add options group to splitter
+    splitter.addWidget(options_group)
+    
+    # --- Preview section ---
+    preview_group = QGroupBox("Fix Preview")
+    preview_layout = QVBoxLayout(preview_group)
+    
+    self.preview_table = QTableView()
+    self.preview_model = QStandardItemModel()
+    self.preview_model.setHorizontalHeaderLabels(["Original Path", "New Path", "Issues Fixed"])
+    self.preview_table.setModel(self.preview_model)
+    self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    self.preview_table.horizontalHeader().setStretchLastSection(True)
+    
+    preview_layout.addWidget(self.preview_table)
+    
+    # Preview button
+    self.preview_button = QPushButton("Generate Preview")
+    self.preview_button.clicked.connect(self.generate_fix_preview)
+    preview_layout.addWidget(self.preview_button)
+    
+    # Add preview group to splitter
+    splitter.addWidget(preview_group)
+    
+    # Add splitter to layout
+    layout.addWidget(splitter)
+    
+    # --- Progress section ---
+    progress_group = QGroupBox("Fix Progress")
+    progress_layout = QVBoxLayout(progress_group)
+    
+    self.clean_progress_bar = QProgressBar()
+    progress_layout.addWidget(self.clean_progress_bar)
+    
+    # Status label
+    self.clean_status_label = QLabel("Ready to start fixing issues")
+    progress_layout.addWidget(self.clean_status_label)
+    
+    # Add to layout
+    layout.addWidget(progress_group)
+    
+    # --- Control buttons ---
+    button_layout = QHBoxLayout()
+    
+    self.start_fix_button = QPushButton("Start Fixing Issues")
+    self.start_fix_button.clicked.connect(self.start_fixing_issues)
+    self.start_fix_button.setEnabled(False)
+    
+    self.cancel_fix_button = QPushButton("Cancel")
+    self.cancel_fix_button.clicked.connect(self.cancel_fixing_issues)
+    self.cancel_fix_button.setEnabled(False)
+    
+    button_layout.addStretch()
+    button_layout.addWidget(self.start_fix_button)
+    button_layout.addWidget(self.cancel_fix_button)
+    button_layout.addStretch()
+    
+    # Add to layout
+    layout.addLayout(button_layout)
+
+def select_target_folder(self):
+    """Select target folder for cleaned files"""
+    try:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Target Folder", "", QFileDialog.ShowDirsOnly
+        )
+        
+        if folder:
+            self.target_path_edit.setText(folder)
+            self.start_fix_button.setEnabled(True)
+            
+            # If we have a cleanup widget, update it too
+            if hasattr(self, 'cleanup_widget'):
+                # Assuming the cleanup widget has a method to set the target folder
+                if hasattr(self.cleanup_widget, 'set_target_folder'):
+                    self.cleanup_widget.set_target_folder(folder)
+    except Exception as e:
+        logger.error(f"Error selecting target folder: {e}")
+        QMessageBox.critical(self, "Folder Selection Error", 
+                           f"Error selecting folder: {str(e)}")
+
+def generate_fix_preview(self):
+    """Generate a preview of the fixes that will be applied"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                             "No scan data available. Please scan files first.")
+            return
+            
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Analysis", 
+                             "No analysis results available. Please run analysis first.")
+            return
+            
+        # Check if target folder is selected
+        target_folder = self.target_path_edit.text()
+        if not target_folder:
+            QMessageBox.warning(self, "No Target", 
+                             "Please select a target folder for the fixed files.")
+            return
+            
+        # Get fix options
+        fix_options = {
+            'fix_path_issues': self.fix_path_check.isChecked(),
+            'path_strategy': self.path_strategy_combo.currentText(),
+            'fix_name_issues': self.fix_name_check.isChecked(),
+            'name_strategy': self.name_strategy_combo.currentText(),
+            'fix_duplicates': self.fix_duplicates_check.isChecked(),
+            'duplicate_strategy': self.dup_strategy_combo.currentText()
+        }
+        
+        # Create data cleaner
+        from core.data_cleaner import DataCleaner
+        cleaner = DataCleaner()
+        
+        # Generate preview
+        preview = cleaner.preview_fixes(analysis_results, fix_options)
+        
+        # Update preview table
+        self.preview_model.removeRows(0, self.preview_model.rowCount())
+        
+        # Add path fixes
+        for fix in preview.get('path_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem("Path Length")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Add name fixes
+        for fix in preview.get('name_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem("Naming Issues")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Add duplicate fixes
+        for fix in preview.get('duplicate_fixes', []):
+            original = fix.get('original', '')
+            fixed = fix.get('fixed', '')
+            reference = fix.get('reference', '')
+            
+            row = [
+                QStandardItem(original),
+                QStandardItem(fixed),
+                QStandardItem(f"Duplicate of {os.path.basename(reference)}")
+            ]
+            
+            self.preview_model.appendRow(row)
+        
+        # Enable start button
+        self.start_fix_button.setEnabled(True)
+        
+        # Update status
+        total_fixes = preview.get('total_fixes', 0)
+        self.clean_status_label.setText(f"Preview generated: {total_fixes} fixes to apply")
+        
+    except Exception as e:
+        logger.error(f"Error generating fix preview: {e}")
+        QMessageBox.critical(self, "Preview Error", 
+                           f"Error generating preview: {str(e)}")
+
+def start_fixing_issues(self):
+    """Start the fixing process"""
+    try:
+        # Check if we have scan data
+        scan_data = self.data_processor.get_scan_data()
+        if scan_data is None or len(scan_data) == 0:
+            QMessageBox.warning(self, "No Data", 
+                             "No scan data available. Please scan files first.")
+            return
+            
+        # Get analysis results
+        analysis_results = self.data_processor.get_analysis_results()
+        if not analysis_results:
+            QMessageBox.warning(self, "No Analysis", 
+                             "No analysis results available. Please run analysis first.")
+            return
+            
+        # Check if target folder is selected
+        target_folder = self.target_path_edit.text()
+        if not target_folder:
+            QMessageBox.warning(self, "No Target", 
+                             "Please select a target folder for the fixed files.")
+            return
+            
+        # Get fix options
+        clean_options = {
+            'fix_path_issues': self.fix_path_check.isChecked(),
+            'path_strategy': self.path_strategy_combo.currentText(),
+            'fix_name_issues': self.fix_name_check.isChecked(),
+            'name_strategy': self.name_strategy_combo.currentText(),
+            'fix_duplicates': self.fix_duplicates_check.isChecked(),
+            'duplicate_strategy': self.dup_strategy_combo.currentText(),
+            'source_folder': self.source_folder_edit.text()
+        }
+        
+        # Set up callbacks
+        callbacks = {
+            'progress': self.update_clean_progress,
+            'status': self.update_clean_status,
+            'error': self.clean_error,
+            'file_processed': self.file_processed,
+            'cleaning_completed': self.cleaning_completed
+        }
+        
+        # Disable UI
+        self.start_fix_button.setEnabled(False)
+        self.cancel_fix_button.setEnabled(True)
+        self.preview_button.setEnabled(False)
+        
+        # Reset progress
+        self.clean_progress_bar.setValue(0)
+        self.clean_status_label.setText("Starting cleanup...")
+        
+        # Start cleaning
+        self.data_processor.start_cleaning(target_folder, clean_options, callbacks)
+        
+    except Exception as e:
+        logger.error(f"Error starting cleanup: {e}")
+        QMessageBox.critical(self, "Cleanup Error", 
+                           f"Error starting cleanup: {str(e)}")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+
+def cancel_fixing_issues(self):
+    """Cancel the fixing process"""
+    try:
+        # Stop cleaning
+        self.data_processor.stop_cleaning()
+        
+        # Update status
+        self.clean_status_label.setText("Cleanup cancelled")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+    except Exception as e:
+        logger.error(f"Error cancelling cleanup: {e}")
+        QMessageBox.critical(self, "Cancel Error", 
+                           f"Error cancelling cleanup: {str(e)}")
+
+def update_clean_progress(self, current, total):
+    """Update the cleanup progress bar"""
+    try:
+        progress = int((current / max(total, 1)) * 100)
+        self.clean_progress_bar.setValue(progress)
+        
+    except Exception as e:
+        logger.error(f"Error updating cleanup progress: {e}")
+
+def update_clean_status(self, status):
+    """Update the cleanup status label"""
+    try:
+        self.clean_status_label.setText(status)
+        
+    except Exception as e:
+        logger.error(f"Error updating cleanup status: {e}")
+
+def clean_error(self, error_msg):
+    """Handle cleanup error"""
+    try:
+        logger.error(f"Cleanup error: {error_msg}")
+        
+        # Update status
+        self.clean_status_label.setText(f"Error: {error_msg}")
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+        # Show error message
+        QMessageBox.critical(self, "Cleanup Error", 
+                           f"Error during cleanup: {error_msg}")
+        
+    except Exception as e:
+        logger.error(f"Error handling cleanup error: {e}")
+
+def file_processed(self, original_path, processed_path):
+    """Handle file processed callback"""
+    try:
+        # Update status with latest file
+        filename = os.path.basename(original_path)
+        self.clean_status_label.setText(f"Processed: {filename}")
+        
+    except Exception as e:
+        logger.error(f"Error handling file processed: {e}")
+
+def cleaning_completed(self, cleaned_files):
+    """Handle cleanup completion"""
+    try:
+        # Update status
+        total_files = len(cleaned_files) if cleaned_files else 0
+        self.clean_status_label.setText(f"Cleanup completed: {total_files} files processed")
+        
+        # Set progress to 100%
+        self.clean_progress_bar.setValue(100)
+        
+        # Re-enable UI
+        self.start_fix_button.setEnabled(True)
+        self.cancel_fix_button.setEnabled(False)
+        self.preview_button.setEnabled(True)
+        
+        # Show success message
+        QMessageBox.information(self, "Cleanup Complete", 
+                              f"Cleanup completed successfully. {total_files} files processed.")
+        
+    except Exception as e:
+        logger.error(f"Error handling cleanup completion: {e}")
+
+def on_fix_completed(self, results):
+    """Handle fix completion from the cleanup widget"""
+    try:
+        # Update UI
+        self.clean_progress_bar.setValue(100)
+        
+        # Show success message
+        total_fixed = results.get('total_fixed', 0)
+        QMessageBox.information(self, "Fixes Complete", 
+                              f"Fixed {total_fixed} issues successfully.")
+        
+    except Exception as e:
+        logger.error(f"Error handling fix completion: {e}")
+    
+    def create_settings_tab(self):
+    """Create the settings tab"""
+    try:
+        # Create tab widget
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Create sections for different settings
+        # 1. SharePoint Settings
+        sp_group = QGroupBox("SharePoint Settings")
+        sp_layout = QGridLayout(sp_group)
+        
+        # SharePoint URL
+        sp_layout.addWidget(QLabel("SharePoint URL:"), 0, 0)
+        self.sp_url_edit = QLineEdit()
+        self.sp_url_edit.setPlaceholderText("https://contoso.sharepoint.com/sites/mysite")
+        sp_layout.addWidget(self.sp_url_edit, 0, 1)
+        
+        # Authentication Type
+        sp_layout.addWidget(QLabel("Authentication:"), 1, 0)
+        self.auth_combo = QComboBox()
+        self.auth_combo.addItems([
+            "Modern Authentication (OAuth)",
+            "Username and Password",
+            "App-Only Authentication"
+        ])
+        self.auth_combo.currentIndexChanged.connect(self.auth_type_changed)
+        sp_layout.addWidget(self.auth_combo, 1, 1)
+        
+        # Username
+        sp_layout.addWidget(QLabel("Username:"), 2, 0)
+        self.username_edit = QLineEdit()
+        self.username_edit.setPlaceholderText("user@example.com")
+        sp_layout.addWidget(self.username_edit, 2, 1)
+        
+        # Password
+        sp_layout.addWidget(QLabel("Password:"), 3, 0)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.Password)
+        sp_layout.addWidget(self.password_edit, 3, 1)
+        
+        # Client ID
+        self.client_id_label = QLabel("Client ID:")
+        sp_layout.addWidget(self.client_id_label, 4, 0)
+        self.client_id_edit = QLineEdit()
+        self.client_id_edit.setEnabled(False)
+        sp_layout.addWidget(self.client_id_edit, 4, 1)
+        
+        # Client Secret
+        self.client_secret_label = QLabel("Client Secret:")
+        sp_layout.addWidget(self.client_secret_label, 5, 0)
+        self.client_secret_edit = QLineEdit()
+        self.client_secret_edit.setEchoMode(QLineEdit.Password)
+        self.client_secret_edit.setEnabled(False)
+        sp_layout.addWidget(self.client_secret_edit, 5, 1)
+        
+        # Test Connection
+        sp_layout.addWidget(QLabel(""), 6, 0)  # Empty row
+        self.test_connection_btn = QPushButton("Test Connection")
+        self.test_connection_btn.clicked.connect(self.test_sharepoint_connection)
+        sp_layout.addWidget(self.test_connection_btn, 7, 0, 1, 2)
+        
+        # Add group to layout
+        layout.addWidget(sp_group)
+        
+        # 2. Scanning Options
+        scan_group = QGroupBox("Scanning Options")
+        scan_layout = QVBoxLayout(scan_group)
+        
+        # Thread Count
+        thread_layout = QHBoxLayout()
+        thread_layout.addWidget(QLabel("Max Threads:"))
+        self.thread_spinner = QSpinBox()
+        self.thread_spinner.setRange(1, 16)
+        self.thread_spinner.setValue(4)
+        thread_layout.addWidget(self.thread_spinner)
+        thread_layout.addStretch()
+        scan_layout.addLayout(thread_layout)
+        
+        # File Size Limit
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel("Max File Size to Hash:"))
+        self.max_file_size_spinner = QSpinBox()
+        self.max_file_size_spinner.setRange(1, 1000)
+        self.max_file_size_spinner.setValue(50)
+        self.max_file_size_spinner.setSuffix(" MB")
+        size_layout.addWidget(self.max_file_size_spinner)
+        size_layout.addStretch()
+        scan_layout.addLayout(size_layout)
+        
+        # Scan Options
+        self.scan_hidden_check = QCheckBox("Scan Hidden Files and Folders")
+        scan_layout.addWidget(self.scan_hidden_check)
+        
+        self.scan_system_check = QCheckBox("Scan System Files")
+        scan_layout.addWidget(self.scan_system_check)
+        
+        self.follow_symlinks_check = QCheckBox("Follow Symbolic Links")
+        scan_layout.addWidget(self.follow_symlinks_check)
+        
+        # Add group to layout
+        layout.addWidget(scan_group)
+        
+        # 3. SharePoint Limits
+        limits_group = QGroupBox("SharePoint Limits")
+        limits_layout = QGridLayout(limits_group)
+        
+        # Max Path Length
+        limits_layout.addWidget(QLabel("Max Path Length:"), 0, 0)
+        self.max_path_spinner = QSpinBox()
+        self.max_path_spinner.setRange(100, 400)
+        self.max_path_spinner.setValue(256)
+        self.max_path_spinner.setSuffix(" characters")
+        limits_layout.addWidget(self.max_path_spinner, 0, 1)
+        
+        # Max Filename Length
+        limits_layout.addWidget(QLabel("Max Filename Length:"), 1, 0)
+        self.max_filename_spinner = QSpinBox()
+        self.max_filename_spinner.setRange(50, 250)
+        self.max_filename_spinner.setValue(128)
+        self.max_filename_spinner.setSuffix(" characters")
+        limits_layout.addWidget(self.max_filename_spinner, 1, 1)
+        
+        # Add group to layout
+        layout.addWidget(limits_group)
+        
+        # 4. Logging Options
+        log_group = QGroupBox("Logging Options")
+        log_layout = QVBoxLayout(log_group)
+        
+        # Log Level
+        level_layout = QHBoxLayout()
+        level_layout.addWidget(QLabel("Log Level:"))
+        self.log_level_combo = QComboBox()
+        self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+        self.log_level_combo.setCurrentText("INFO")
+        level_layout.addWidget(self.log_level_combo)
+        level_layout.addStretch()
+        log_layout.addLayout(level_layout)
+        
+        # Log File Location
+        log_path_layout = QHBoxLayout()
+        log_path_layout.addWidget(QLabel("Log File:"))
+        self.log_path_edit = QLineEdit()
+        self.log_path_edit.setReadOnly(True)
+        log_path_layout.addWidget(self.log_path_edit)
+        
+        self.log_path_btn = QPushButton("Browse...")
+        self.log_path_btn.clicked.connect(self.select_log_path)
+        log_path_layout.addWidget(self.log_path_btn)
+        
+        log_layout.addLayout(log_path_layout)
+        
+        # Log Options
+        self.console_log_check = QCheckBox("Log to Console")
+        self.console_log_check.setChecked(True)
+        log_layout.addWidget(self.console_log_check)
+        
+        self.file_log_check = QCheckBox("Log to File")
+        self.file_log_check.setChecked(True)
+        log_layout.addWidget(self.file_log_check)
+        
+        # Add group to layout
+        layout.addWidget(log_group)
+        
+        # Save/Reset Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.reset_btn = QPushButton("Reset to Defaults")
+        self.reset_btn.clicked.connect(self.reset_settings)
+        button_layout.addWidget(self.reset_btn)
+        
+        self.save_btn = QPushButton("Save Settings")
+        self.save_btn.clicked.connect(self.save_settings)
+        button_layout.addWidget(self.save_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Load settings
+        self.load_settings()
+        
+        return tab
+    except Exception as e:
+        logger.error(f"Error creating settings tab: {e}")
+        # Create an error tab
+        error_tab = QWidget()
+        error_layout = QVBoxLayout(error_tab)
+        error_layout.addWidget(QLabel(f"Error creating settings tab: {str(e)}"))
+        return error_tab
+
+def auth_type_changed(self, index):
+    """Handle authentication type change"""
+    try:
+        auth_type = self.auth_combo.currentText()
+        
+        # Show/hide appropriate fields based on auth type
+        if "App-Only" in auth_type:
+            # App-Only Auth - show client credentials, hide username/password
+            self.username_edit.setEnabled(False)
+            self.password_edit.setEnabled(False)
+            self.client_id_edit.setEnabled(True)
+            self.client_secret_edit.setEnabled(True)
+        else:
+            # Username/Password Auth - show username/password, hide client credentials
+            self.username_edit.setEnabled(True)
+            self.password_edit.setEnabled(True)
+            self.client_id_edit.setEnabled(False)
+            self.client_secret_edit.setEnabled(False)
+    except Exception as e:
+        logger.error(f"Error handling auth type change: {e}")
+
+def select_log_path(self):
+    """Select log file path"""
+    try:
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Log File",
+            "",
+            "Log Files (*.log);;Text Files (*.txt)"
+        )
+        
+        if file_path:
+            self.log_path_edit.setText(file_path)
+    except Exception as e:
+        logger.error(f"Error selecting log path: {e}")
+        QMessageBox.critical(self, "File Selection Error", 
+                           f"Error selecting log file: {str(e)}")
+
+def test_sharepoint_connection(self):
+    """Test the SharePoint connection with the provided credentials"""
+    try:
+        # Get credentials from UI
+        site_url = self.sp_url_edit.text()
+        auth_type = self.auth_combo.currentText()
+        
+        # Validate URL
+        if not site_url:
+            QMessageBox.warning(self, "Missing Information", 
+                               "Please enter a SharePoint site URL")
+            return
+        
+        # Show progress during connection test
+        self.test_connection_btn.setEnabled(False)
+        self.test_connection_btn.setText("Testing...")
+        
+        # Import SharePoint integration
+        try:
+            from infrastructure.sharepoint import SharePointIntegration
+            sp_integration = SharePointIntegration()
+            
+            success = False
+            
+            # Connect based on auth type
+            if "App-Only" in auth_type:
+                client_id = self.client_id_edit.text()
+                client_secret = self.client_secret_edit.text()
+                
+                # Validate credentials
+                if not client_id or not client_secret:
+                    QMessageBox.warning(self, "Missing Information", 
+                                      "Please enter client ID and client secret")
+                    return
+                
+                success = sp_integration.authenticate_modern(site_url, client_id, client_secret)
+            else:
+                username = self.username_edit.text()
+                password = self.password_edit.text()
+                
+                # Validate credentials
+                if not username or not password:
+                    QMessageBox.warning(self, "Missing Information", 
+                                      "Please enter username and password")
+                    return
+                
+                success = sp_integration.authenticate(site_url, username, password)
+            
+            # Reset the button
+            self.test_connection_btn.setEnabled(True)
+            self.test_connection_btn.setText("Test Connection")
+            
+            # Show result
+            if success:
+                QMessageBox.information(self, "Connection Successful", 
+                                      "Successfully connected to SharePoint")
+            else:
+                QMessageBox.critical(self, "Connection Failed", 
+                                   "Failed to connect to SharePoint. Please check your credentials.")
+        except ImportError as e:
+            logger.error(f"Error importing SharePoint integration: {e}")
+            QMessageBox.critical(self, "Module Error", 
+                               "SharePoint integration module not available")
+            self.test_connection_btn.setEnabled(True)
+            self.test_connection_btn.setText("Test Connection")
+    except Exception as e:
+        logger.error(f"Error testing SharePoint connection: {e}")
+        QMessageBox.critical(self, "Connection Error", 
+                           f"Error testing connection: {str(e)}")
+        self.test_connection_btn.setEnabled(True)
+        self.test_connection_btn.setText("Test Connection")
+
+def load_settings(self):
+    """Load settings from QSettings"""
+    try:
+        from PyQt5.QtCore import QSettings
+        settings = QSettings()
+        
+        # SharePoint Settings
+        self.sp_url_edit.setText(settings.value("sharepoint/url", ""))
+        auth_type = settings.value("sharepoint/auth_type", "Modern Authentication (OAuth)")
+        self.auth_combo.setCurrentText(auth_type)
+        self.username_edit.setText(settings.value("sharepoint/username", ""))
+        self.password_edit.setText(settings.value("sharepoint/password", ""))
+        self.client_id_edit.setText(settings.value("sharepoint/client_id", ""))
+        self.client_secret_edit.setText(settings.value("sharepoint/client_secret", ""))
+        
+        # Scanning Options
+        self.thread_spinner.setValue(int(settings.value("scanning/threads", 4)))
+        self.max_file_size_spinner.setValue(int(settings.value("scanning/max_file_size", 50)))
+        self.scan_hidden_check.setChecked(settings.value("scanning/scan_hidden", False) == "true")
+        self.scan_system_check.setChecked(settings.value("scanning/scan_system", False) == "true")
+        self.follow_symlinks_check.setChecked(settings.value("scanning/follow_symlinks", False) == "true")
+        
+        # SharePoint Limits
+        self.max_path_spinner.setValue(int(settings.value("limits/max_path", 256)))
+        self.max_filename_spinner.setValue(int(settings.value("limits/max_filename", 128)))
+        
+        # Logging Options
+        self.log_level_combo.setCurrentText(settings.value("logging/level", "INFO"))
+        self.log_path_edit.setText(settings.value("logging/path", ""))
+        self.console_log_check.setChecked(settings.value("logging/console", True) == "true")
+        self.file_log_check.setChecked(settings.value("logging/file", True) == "true")
+        
+        # Update UI based on loaded settings
+        self.auth_type_changed(self.auth_combo.currentIndex())
+    except Exception as e:
+        logger.error(f"Error loading settings: {e}")
+
+def save_settings(self):
+    """Save settings to QSettings"""
+    try:
+        from PyQt5.QtCore import QSettings
+        settings = QSettings()
+        
+        # SharePoint Settings
+        settings.setValue("sharepoint/url", self.sp_url_edit.text())
+        settings.setValue("sharepoint/auth_type", self.auth_combo.currentText())
+        settings.setValue("sharepoint/username", self.username_edit.text())
+        
+        # For security, we might not want to store passwords in plain text
+        # One option is to use a secure keyring or credential vault
+        # For simplicity, we're storing it here, but in a real app you'd want to secure it
+        settings.setValue("sharepoint/password", self.password_edit.text())
+        
+        settings.setValue("sharepoint/client_id", self.client_id_edit.text())
+        settings.setValue("sharepoint/client_secret", self.client_secret_edit.text())
+        
+        # Scanning Options
+        settings.setValue("scanning/threads", self.thread_spinner.value())
+        settings.setValue("scanning/max_file_size", self.max_file_size_spinner.value())
+        settings.setValue("scanning/scan_hidden", self.scan_hidden_check.isChecked())
+        settings.setValue("scanning/scan_system", self.scan_system_check.isChecked())
+        settings.setValue("scanning/follow_symlinks", self.follow_symlinks_check.isChecked())
+        
+        # SharePoint Limits
+        settings.setValue("limits/max_path", self.max_path_spinner.value())
+        settings.setValue("limits/max_filename", self.max_filename_spinner.value())
+        
+        # Logging Options
+        settings.setValue("logging/level", self.log_level_combo.currentText())
+        settings.setValue("logging/path", self.log_path_edit.text())
+        settings.setValue("logging/console", self.console_log_check.isChecked())
+        settings.setValue("logging/file", self.file_log_check.isChecked())
+        
+        # Apply logging settings immediately
+        self.apply_logging_settings()
+        
+        # Show confirmation
+        QMessageBox.information(self, "Settings Saved", 
+                              "Settings have been saved successfully.")
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}")
+        QMessageBox.critical(self, "Save Error", 
+                           f"Error saving settings: {str(e)}")
+
+def reset_settings(self):
+    """Reset settings to defaults"""
+    try:
+        # Ask for confirmation
+        confirm = QMessageBox.question(
+            self,
+            "Reset Settings",
+            "Are you sure you want to reset all settings to defaults?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.No:
+            return
+        
+        # SharePoint Settings
+        self.sp_url_edit.setText("")
+        self.auth_combo.setCurrentText("Modern Authentication (OAuth)")
+        self.username_edit.setText("")
+        self.password_edit.setText("")
+        self.client_id_edit.setText("")
+        self.client_secret_edit.setText("")
+        
+        # Scanning Options
+        self.thread_spinner.setValue(4)
+        self.max_file_size_spinner.setValue(50)
+        self.scan_hidden_check.setChecked(False)
+        self.scan_system_check.setChecked(False)
+        self.follow_symlinks_check.setChecked(False)
+        
+        # SharePoint Limits
+        self.max_path_spinner.setValue(256)
+        self.max_filename_spinner.setValue(128)
+        
+        # Logging Options
+        self.log_level_combo.setCurrentText("INFO")
+        self.log_path_edit.setText("")
+        self.console_log_check.setChecked(True)
+        self.file_log_check.setChecked(True)
+        
+        # Update UI
+        self.auth_type_changed(self.auth_combo.currentIndex())
+        
+        # Show confirmation
+        QMessageBox.information(self, "Settings Reset", 
+                              "Settings have been reset to defaults.")
+    except Exception as e:
+        logger.error(f"Error resetting settings: {e}")
+        QMessageBox.critical(self, "Reset Error", 
+                           f"Error resetting settings: {str(e)}")
+
+def apply_logging_settings(self):
+    """Apply the current logging settings"""
+    try:
+        # Get logging settings
+        log_level = self.log_level_combo.currentText()
+        log_path = self.log_path_edit.text()
+        console_log = self.console_log_check.isChecked()
+        file_log = self.file_log_check.isChecked()
+        
+        # Convert string level to logging level
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        level = level_map.get(log_level, logging.INFO)
+        
+        # Get the root logger
+        root_logger = logging.getLogger()
+        
+        # Remove all handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # Set level
+        root_logger.setLevel(level)
+        
+        # Add console handler if enabled
+        if console_log:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(formatter)
+            root_logger.addHandler(console_handler)
+        
+        # Add file handler if enabled and path is set
+        if file_log and log_path:
+            file_handler = logging.FileHandler(log_path)
+            file_handler.setLevel(level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+        
+        logger.info(f"Applied logging settings: level={log_level}, console={console_log}, file={file_log}")
+    except Exception as e:
+        logger.error(f"Error applying logging settings: {e}")
+
+def auth_type_changed(self, index):
+    """Handle authentication type change"""
+    try:
+        auth_type = self.auth_combo.currentText()
+        
+        # Show/hide appropriate fields based on auth type
+        if "App-Only" in auth_type:
+            # App-Only Auth - show client credentials, hide username/password
+            self.username_edit.setEnabled(False)
+            self.password_edit.setEnabled(False)
+            self.client_id_edit.setEnabled(True)
+            self.client_secret_edit.setEnabled(True)
+        else:
+            # Username/Password Auth - show username/password, hide client credentials
+            self.username_edit.setEnabled(True)
+            self.password_edit.setEnabled(True)
+            self.client_id_edit.setEnabled(False)
+            self.client_secret_edit.setEnabled(False)
+    except Exception as e:
+        logger.error(f"Error handling auth type change: {e}")
+
+def select_log_path(self):
+    """Select log file path"""
+    try:
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Log File",
+            "",
+            "Log Files (*.log);;Text Files (*.txt)"
+        )
+        
+        if file_path:
+            self.log_path_edit.setText(file_path)
+    except Exception as e:
+        logger.error(f"Error selecting log path: {e}")
+        QMessageBox.critical(self, "File Selection Error", 
+                           f"Error selecting log file: {str(e)}")
+
+def test_sharepoint_connection(self):
+    """Test the SharePoint connection with the provided credentials"""
+    try:
+        # Get credentials from UI
+        site_url = self.sp_url_edit.text()
+        auth_type = self.auth_combo.currentText()
+        
+        # Validate URL
+        if not site_url:
+            QMessageBox.warning(self, "Missing Information", 
+                               "Please enter a SharePoint site URL")
+            return
+        
+        # Show progress during connection test
+        self.test_connection_btn.setEnabled(False)
+        self.test_connection_btn.setText("Testing...")
+        
+        # Import SharePoint integration
+        try:
+            from infrastructure.sharepoint import SharePointIntegration
+            sp_integration = SharePointIntegration()
+            
+            success = False
+            
+            # Connect based on auth type
+            if "App-Only" in auth_type:
+                client_id = self.client_id_edit.text()
+                client_secret = self.client_secret_edit.text()
+                
+                # Validate credentials
+                if not client_id or not client_secret:
+                    QMessageBox.warning(self, "Missing Information", 
+                                      "Please enter client ID and client secret")
+                    return
+                
+                success = sp_integration.authenticate_modern(site_url, client_id, client_secret)
+            else:
+                username = self.username_edit.text()
+                password = self.password_edit.text()
+                
+                # Validate credentials
+                if not username or not password:
+                    QMessageBox.warning(self, "Missing Information", 
+                                      "Please enter username and password")
+                    return
+                
+                success = sp_integration.authenticate(site_url, username, password)
+            
+            # Reset the button
+            self.test_connection_btn.setEnabled(True)
+            self.test_connection_btn.setText("Test Connection")
+            
+            # Show result
+            if success:
+                QMessageBox.information(self, "Connection Successful", 
+                                      "Successfully connected to SharePoint")
+            else:
+                QMessageBox.critical(self, "Connection Failed", 
+                                   "Failed to connect to SharePoint. Please check your credentials.")
+        except ImportError as e:
+            logger.error(f"Error importing SharePoint integration: {e}")
+            QMessageBox.critical(self, "Module Error", 
+                               "SharePoint integration module not available")
+            self.test_connection_btn.setEnabled(True)
+            self.test_connection_btn.setText("Test Connection")
+    except Exception as e:
+        logger.error(f"Error testing SharePoint connection: {e}")
+        QMessageBox.critical(self, "Connection Error", 
+                           f"Error testing connection: {str(e)}")
+        self.test_connection_btn.setEnabled(True)
+        self.test_connection_btn.setText("Test Connection")
+
+def load_settings(self):
+    """Load settings from QSettings"""
+    try:
+        from PyQt5.QtCore import QSettings
+        settings = QSettings()
+        
+        # SharePoint Settings
+        self.sp_url_edit.setText(settings.value("sharepoint/url", ""))
+        auth_type = settings.value("sharepoint/auth_type", "Modern Authentication (OAuth)")
+        self.auth_combo.setCurrentText(auth_type)
+        self.username_edit.setText(settings.value("sharepoint/username", ""))
+        self.password_edit.setText(settings.value("sharepoint/password", ""))
+        self.client_id_edit.setText(settings.value("sharepoint/client_id", ""))
+        self.client_secret_edit.setText(settings.value("sharepoint/client_secret", ""))
+        
+        # Scanning Options
+        self.thread_spinner.setValue(int(settings.value("scanning/threads", 4)))
+        self.max_file_size_spinner.setValue(int(settings.value("scanning/max_file_size", 50)))
+        self.scan_hidden_check.setChecked(settings.value("scanning/scan_hidden", False) == "true")
+        self.scan_system_check.setChecked(settings.value("scanning/scan_system", False) == "true")
+        self.follow_symlinks_check.setChecked(settings.value("scanning/follow_symlinks", False) == "true")
+        
+        # SharePoint Limits
+        self.max_path_spinner.setValue(int(settings.value("limits/max_path", 256)))
+        self.max_filename_spinner.setValue(int(settings.value("limits/max_filename", 128)))
+        
+        # Logging Options
+        self.log_level_combo.setCurrentText(settings.value("logging/level", "INFO"))
+        self.log_path_edit.setText(settings.value("logging/path", ""))
+        self.console_log_check.setChecked(settings.value("logging/console", True) == "true")
+        self.file_log_check.setChecked(settings.value("logging/file", True) == "true")
+        
+        # Update UI based on loaded settings
+        self.auth_type_changed(self.auth_combo.currentIndex())
+    except Exception as e:
+        logger.error(f"Error loading settings: {e}")
+
+def save_settings(self):
+    """Save settings to QSettings"""
+    try:
+        from PyQt5.QtCore import QSettings
+        settings = QSettings()
+        
+        # SharePoint Settings
+        settings.setValue("sharepoint/url", self.sp_url_edit.text())
+        settings.setValue("sharepoint/auth_type", self.auth_combo.currentText())
+        settings.setValue("sharepoint/username", self.username_edit.text())
+        
+        # For security, we might not want to store passwords in plain text
+        # One option is to use a secure keyring or credential vault
+        # For simplicity, we're storing it here, but in a real app you'd want to secure it
+        settings.setValue("sharepoint/password", self.password_edit.text())
+        
+        settings.setValue("sharepoint/client_id", self.client_id_edit.text())
+        settings.setValue("sharepoint/client_secret", self.client_secret_edit.text())
+        
+        # Scanning Options
+        settings.setValue("scanning/threads", self.thread_spinner.value())
+        settings.setValue("scanning/max_file_size", self.max_file_size_spinner.value())
+        settings.setValue("scanning/scan_hidden", self.scan_hidden_check.isChecked())
+        settings.setValue("scanning/scan_system", self.scan_system_check.isChecked())
+        settings.setValue("scanning/follow_symlinks", self.follow_symlinks_check.isChecked())
+        
+        # SharePoint Limits
+        settings.setValue("limits/max_path", self.max_path_spinner.value())
+        settings.setValue("limits/max_filename", self.max_filename_spinner.value())
+        
+        # Logging Options
+        settings.setValue("logging/level", self.log_level_combo.currentText())
+        settings.setValue("logging/path", self.log_path_edit.text())
+        settings.setValue("logging/console", self.console_log_check.isChecked())
+        settings.setValue("logging/file", self.file_log_check.isChecked())
+        
+        # Apply logging settings immediately
+        self.apply_logging_settings()
+        
+        # Show confirmation
+        QMessageBox.information(self, "Settings Saved", 
+                              "Settings have been saved successfully.")
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}")
+        QMessageBox.critical(self, "Save Error", 
+                           f"Error saving settings: {str(e)}")
+
+def reset_settings(self):
+    """Reset settings to defaults"""
+    try:
+        # Ask for confirmation
+        confirm = QMessageBox.question(
+            self,
+            "Reset Settings",
+            "Are you sure you want to reset all settings to defaults?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.No:
+            return
+        
+        # SharePoint Settings
+        self.sp_url_edit.setText("")
+        self.auth_combo.setCurrentText("Modern Authentication (OAuth)")
+        self.username_edit.setText("")
+        self.password_edit.setText("")
+        self.client_id_edit.setText("")
+        self.client_secret_edit.setText("")
+        
+        # Scanning Options
+        self.thread_spinner.setValue(4)
+        self.max_file_size_spinner.setValue(50)
+        self.scan_hidden_check.setChecked(False)
+        self.scan_system_check.setChecked(False)
+        self.follow_symlinks_check.setChecked(False)
+        
+        # SharePoint Limits
+        self.max_path_spinner.setValue(256)
+        self.max_filename_spinner.setValue(128)
+        
+        # Logging Options
+        self.log_level_combo.setCurrentText("INFO")
+        self.log_path_edit.setText("")
+        self.console_log_check.setChecked(True)
+        self.file_log_check.setChecked(True)
+        
+        # Update UI
+        self.auth_type_changed(self.auth_combo.currentIndex())
+        
+        # Show confirmation
+        QMessageBox.information(self, "Settings Reset", 
+                              "Settings have been reset to defaults.")
+    except Exception as e:
+        logger.error(f"Error resetting settings: {e}")
+        QMessageBox.critical(self, "Reset Error", 
+                           f"Error resetting settings: {str(e)}")
+
+def apply_logging_settings(self):
+    """Apply the current logging settings"""
+    try:
+        # Get logging settings
+        log_level = self.log_level_combo.currentText()
+        log_path = self.log_path_edit.text()
+        console_log = self.console_log_check.isChecked()
+        file_log = self.file_log_check.isChecked()
+        
+        # Convert string level to logging level
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        level = level_map.get(log_level, logging.INFO)
+        
+        # Get the root logger
+        root_logger = logging.getLogger()
+        
+        # Remove all handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # Set level
+        root_logger.setLevel(level)
+        
+        # Add console handler if enabled
+        if console_log:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(formatter)
+            root_logger.addHandler(console_handler)
+        
+        # Add file handler if enabled and path is set
+        if file_log and log_path:
+            file_handler = logging.FileHandler(log_path)
+            file_handler.setLevel(level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+        
+        logger.info(f"Applied logging settings: level={log_level}, console={console_log}, file={file_log}")
+    except Exception as e:
+        logger.error(f"Error applying logging settings: {e}")
+    
+    def browse_source_folder(self):
+        """Open a file dialog to select source folder"""
+        try:
+            logger.info("Opening folder selection dialog")
+            
+            folder = QFileDialog.getExistingDirectory(self, "Select Source Folder")
+            
+            if folder:
+                logger.info(f"Selected folder: {folder}")
+                self.source_folder_edit.setText(folder)
+                self.scan_button.setEnabled(True)
+                self.scan_status.setText(f"Ready to scan: {folder}")
+            else:
+                logger.info("Folder selection cancelled")
+        except Exception as e:
+            logger.error(f"Error browsing for folder: {e}")
+            QMessageBox.critical(self, "Folder Selection Error", 
+                               f"Error selecting folder: {str(e)}")
+    
+    def start_scan(self):
+        """Start the scanning process"""
+        try:
+            source_folder = self.source_folder_edit.text()
+            
+            if not source_folder or not os.path.exists(source_folder):
+                logger.error(f"Invalid source folder: {source_folder}")
+                QMessageBox.warning(self, "Invalid Folder", 
+                                   "Please select a valid source folder")
+                return
+            
+            logger.info(f"Starting scan of folder: {source_folder}")
+            
+            # Update UI
+            self.scan_status.setText(f"Scanning: {source_folder}")
+            self.scan_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+            self.browse_button.setEnabled(False)
+            self.scan_progress.setValue(0)
+            
+            # Prepare scan options
+            scan_options = {
+                'recursive': self.recursive_checkbox.isChecked(),
+                'include_hidden': self.hidden_checkbox.isChecked()
+            }
+            
+            # Prepare callbacks
+            callbacks = {
+                'progress': self.update_scan_progress,
+                'scan_completed': self.scan_completed,
+                'error': self.scan_error
+            }
+            
+            # Print debug information
+            logger.debug(f"Starting scan with options: {scan_options}")
+            logger.debug(f"Data processor: {self.data_processor}")
+            
+            # Start scanning in a separate thread
+            self.data_processor.start_scan(source_folder, scan_options, callbacks)
+            
+        except Exception as e:
+            logger.error(f"Error starting scan: {e}")
+            self.scan_error(f"Error starting scan: {str(e)}")
+    
+    def stop_scan(self):
+        """Stop the scanning process"""
+        try:
+            logger.info("Stopping scan")
+            
+            # Stop the scan
+            self.data_processor.stop_scanning()
+            
+            # Update UI
+            self.scan_status.setText("Scan stopped by user")
+            self.scan_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.browse_button.setEnabled(True)
+            
+        except Exception as e:
+            logger.error(f"Error stopping scan: {e}")
+            QMessageBox.critical(self, "Error", 
+                               f"Error stopping scan: {str(e)}")
+    
+    @pyqtSlot(int, int)
+    def update_scan_progress(self, current, total):
+        """Update the scan progress bar"""
+        try:
+            progress = int((current / max(total, 1)) * 100)
+            self.scan_progress.setValue(progress)
+            
+            # Update status
+            self.scan_status.setText(f"Scanning: {current} of {total} files ({progress}%)")
+            
+        except Exception as e:
+            logger.error(f"Error updating progress: {e}")
+    
+    @pyqtSlot(object)
+    def scan_completed(self, results):
+        """Handle scan completion"""
+        try:
+            logger.info("Scan completed successfully")
+            
+            # Get the results
+            file_count = len(results) if hasattr(results, "__len__") else 0
+            
+            # Update UI
+            self.scan_status.setText(f"Scan completed: {file_count} files found")
+            self.scan_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.browse_button.setEnabled(True)
+            
+            # Switch to analyze tab
+            self.tab_widget.setCurrentIndex(1)  # Analyze tab
+            
+            # Show success message
+            QMessageBox.information(self, "Scan Complete", 
+                                  f"Scan completed successfully. {file_count} files found.")
+            
+        except Exception as e:
+            logger.error(f"Error handling scan completion: {e}")
+            self.scan_error(f"Error handling scan completion: {str(e)}")
+    
+    @pyqtSlot(str)
+    def scan_error(self, error_msg):
+        """Handle scan error"""
+        try:
+            logger.error(f"Scan error: {error_msg}")
+            
+            # Update UI
+            self.scan_status.setText(f"Error: {error_msg}")
+            self.scan_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            self.browse_button.setEnabled(True)
+            
+            # Show error message
+            QMessageBox.critical(self, "Scan Error", 
+                               f"Error during scan: {error_msg}")
+            
+        except Exception as e:
+            logger.error(f"Error handling scan error: {e}")
+            # If we can't show an error message, print to console as last resort
+            print(f"ERROR: {str(e)}")
