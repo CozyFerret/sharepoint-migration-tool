@@ -15,12 +15,14 @@ This desktop application prepares local file systems for SharePoint migration by
 - Comprehensive scanning and analysis with detailed reports
 - User-friendly interface with visualization and detailed issue reporting
 - Export functionality in multiple formats (CSV, Excel, JSON, Text)
+- Comprehensive testing suite for reliability
 
 ## Technical Details
 - Python-based desktop application using PyQt5
 - Modular architecture with separation of concerns
 - Multithreaded design for responsive UI during long operations
 - Optional SharePoint integration via the Office365 REST API
+- Automated testing with pytest
 
 ## Security Considerations
 - All operations performed in-memory
@@ -35,6 +37,7 @@ The application follows a modular design with clear separation between:
 - Issue resolution (fixers)
 - UI components
 - SharePoint integration
+- Testing infrastructure
 
 ## Development Goals
 - Maintain clean, modular code structure
@@ -42,3 +45,10 @@ The application follows a modular design with clear separation between:
 - Keep security as a priority throughout development
 - Make extensible design for future enhancements
 - Create intuitive UI for non-technical users
+
+## Testing Philosophy
+- Comprehensive unit testing for all core components
+- Test-driven development for new features
+- Automatic generation of test data
+- Mock implementations for external dependencies
+- Continuous integration for each pull request

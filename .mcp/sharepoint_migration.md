@@ -70,3 +70,11 @@
 - Document changes made during cleaning
 - Create a rollback plan
 - Perform post-migration validation
+
+## Testing Migration Scenarios
+- Create test data with various issues
+- Verify file name fixing
+- Verify path shortening
+- Test duplicate detection accuracy
+- Measure performance with large datasets
+- Validate SharePoint compatibility of fixed content

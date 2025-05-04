@@ -34,6 +34,13 @@
 - `secure_logging.py` - Privacy-preserving logging
 - `memory_cleanup.py` - Secure memory wiping utilities
 
+### Tests
+- `conftest.py` - Shared test fixtures and configuration
+- `test_scanner.py` - Tests for file system scanner
+- `test_data_cleaner.py` - Tests for data cleaning operations
+- `test_data_processor.py` - Tests for process orchestration
+- `create_test_dir.py` - Script to generate test data with various SharePoint migration challenges
+
 ## File Hierarchy
 ```
 sharepoint_migration_tool/
@@ -63,6 +70,20 @@ sharepoint_migration_tool/
 │   ├── config.py
 │   ├── secure_logging.py
 │   └── memory_cleanup.py
+├── tests/                  # Test suite
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_scanner.py
+│   ├── test_data_cleaner.py
+│   ├── test_data_processor.py
+│   ├── analyzers/
+│   │   ├── test_name_validator.py
+│   │   ├── test_path_analyzer.py
+│   │   └── test_duplicate_finder.py
+│   ├── fixers/
+│   │   ├── test_path_shortener.py
+│   │   └── test_name_fixer.py
+│   └── create_test_dir.py
 ├── main.py                 # Application entry point
 └── README.md               # Project documentation
 ```
@@ -74,6 +95,7 @@ sharepoint_migration_tool/
 - Scanner provides raw file data to Analyzers
 - Fixers apply changes based on Analyzer results
 - SharePoint module integrates with the Data Cleaner for uploads
+- Test modules use mock classes to isolate components for unit testing
 
 ## Data Flow
 
@@ -84,3 +106,11 @@ sharepoint_migration_tool/
 5. User initiates cleanup via Data Cleaner
 6. Fixers apply fixes to files based on analysis
 7. Data Cleaner copies fixed files or uploads to SharePoint
+
+## Testing Flow
+
+1. Test fixtures create controlled test environments
+2. Unit tests validate individual component functionality
+3. Integration tests verify component interactions
+4. Test data generator creates realistic test scenarios
+5. Coverage reporting ensures comprehensive testing
