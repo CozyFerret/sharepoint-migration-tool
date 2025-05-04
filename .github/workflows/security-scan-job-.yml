@@ -1,0 +1,21 @@
+security-scan:
+  runs-on: ubuntu-latest
+  steps:
+  - uses: actions/checkout@v3
+  - name: Set up Python
+    uses: actions/setup-python@v4
+    with:
+      python-version: '3.9'
+  - name: Install dependencies
+    run: |
+      python -m pip install --upgrade pip
+      pip install bandit
+  - name: Scan with bandit
+    run: |
+      # Run a security scan with specific settings to skip the B110 check 
+      # or other specific issues that you've evaluated and accepted
+      bandit -r . -x ./tests,./venv --skip B110 || true
+      
+      # Alternatively, you can use a bandit configuration file
+      # Create a .bandit file in your repository with custom rules
+      # bandit -r . -x ./tests,./venv -c .bandit

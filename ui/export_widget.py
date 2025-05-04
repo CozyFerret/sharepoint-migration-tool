@@ -325,7 +325,11 @@ class ExportWidget(QWidget):
                 preview_data["pii_sample"] = self.analysis_results['pii'].head(2).to_dict('records')
                 
         # Convert to JSON for preview
-        return json.dumps(preview_data, indent=2, default=str)
+        try:
+            return json.dumps(preview_data, indent=2, default=str)
+        except Exception as exc:
+            logger.error(f"Error generating JSON preview: {exc}")
+            return "Error generating JSON preview"
         
     def _generate_csv_headers(self):
         """
@@ -410,9 +414,9 @@ class ExportWidget(QWidget):
             # Show the exported file in the explorer
             self._show_in_explorer(file_path)
             
-        except Exception as e:
-            logger.error(f"Error exporting data: {e}")
-            QMessageBox.critical(self, "Error", f"Error exporting data: {str(e)}")
+        except Exception as exc:
+            logger.error(f"Error exporting data: {exc}")
+            QMessageBox.critical(self, "Error", f"Error exporting data: {str(exc)}")
             
     def _export_csv(self, file_path):
         """
@@ -461,30 +465,34 @@ class ExportWidget(QWidget):
             file_path (str): Path to save the Excel file
         """
         # Create an ExcelWriter object
-        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-            # Export name issues
-            if (self.export_all_check.isChecked() or self.export_name_check.isChecked()) and 'name_issues' in self.analysis_results:
-                self.analysis_results['name_issues'].to_excel(writer, sheet_name='Name Issues', index=False)
-                
-            # Export path issues
-            if (self.export_all_check.isChecked() or self.export_path_check.isChecked()) and 'path_issues' in self.analysis_results:
-                self.analysis_results['path_issues'].to_excel(writer, sheet_name='Path Issues', index=False)
-                
-            # Export duplicates
-            if (self.export_all_check.isChecked() or self.export_duplicate_check.isChecked()) and 'duplicates' in self.analysis_results:
-                self.analysis_results['duplicates'].to_excel(writer, sheet_name='Duplicates', index=False)
-                
-            # Export PII
-            if (self.export_all_check.isChecked() or self.export_pii_check.isChecked()) and 'pii' in self.analysis_results:
-                self.analysis_results['pii'].to_excel(writer, sheet_name='PII', index=False)
-                
-            # Export summary as a DataFrame
-            if self.export_summary_check.isChecked():
-                # Create a simple DataFrame for the summary
-                summary_text = self._generate_text_summary()
-                summary_lines = summary_text.split('\n')
-                summary_df = pd.DataFrame({'Summary': summary_lines})
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        try:
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                # Export name issues
+                if (self.export_all_check.isChecked() or self.export_name_check.isChecked()) and 'name_issues' in self.analysis_results:
+                    self.analysis_results['name_issues'].to_excel(writer, sheet_name='Name Issues', index=False)
+                    
+                # Export path issues
+                if (self.export_all_check.isChecked() or self.export_path_check.isChecked()) and 'path_issues' in self.analysis_results:
+                    self.analysis_results['path_issues'].to_excel(writer, sheet_name='Path Issues', index=False)
+                    
+                # Export duplicates
+                if (self.export_all_check.isChecked() or self.export_duplicate_check.isChecked()) and 'duplicates' in self.analysis_results:
+                    self.analysis_results['duplicates'].to_excel(writer, sheet_name='Duplicates', index=False)
+                    
+                # Export PII
+                if (self.export_all_check.isChecked() or self.export_pii_check.isChecked()) and 'pii' in self.analysis_results:
+                    self.analysis_results['pii'].to_excel(writer, sheet_name='PII', index=False)
+                    
+                # Export summary as a DataFrame
+                if self.export_summary_check.isChecked():
+                    # Create a simple DataFrame for the summary
+                    summary_text = self._generate_text_summary()
+                    summary_lines = summary_text.split('\n')
+                    summary_df = pd.DataFrame({'Summary': summary_lines})
+                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        except Exception as exc:
+            logger.error(f"Error exporting to Excel: {exc}")
+            raise
                 
     def _export_json(self, file_path):
         """
@@ -525,8 +533,12 @@ class ExportWidget(QWidget):
                 export_data["pii"] = self.analysis_results['pii'].to_dict('records')
                 
         # Write to file
-        with open(file_path, 'w') as f:
-            json.dump(export_data, f, indent=2, default=str)
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(export_data, f, indent=2, default=str)
+        except Exception as exc:
+            logger.error(f"Error exporting to JSON: {exc}")
+            raise
             
     def _export_text(self, file_path):
         """
@@ -539,8 +551,12 @@ class ExportWidget(QWidget):
         summary = self._generate_text_summary()
         
         # Write to file
-        with open(file_path, 'w') as f:
-            f.write(summary)
+        try:
+            with open(file_path, 'w') as f:
+                f.write(summary)
+        except Exception as exc:
+            logger.error(f"Error exporting to text file: {exc}")
+            raise
             
     def _show_in_explorer(self, file_path):
         """
@@ -549,15 +565,19 @@ class ExportWidget(QWidget):
         Args:
             file_path (str): Path to the exported file
         """
-        if os.name == 'nt':  # Windows
-            import subprocess
-            subprocess.Popen(f'explorer /select,"{file_path}"')
-        elif os.name == 'posix':  # macOS and Linux
-            import subprocess
-            if os.path.exists('/usr/bin/open'):  # macOS
-                subprocess.Popen(['open', os.path.dirname(file_path)])
-            else:  # Linux
-                try:
-                    subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
-                except:
-                    pass  # Silently fail if unable to open file explorer
+        try:
+            if os.name == 'nt':  # Windows
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{file_path}"')
+            elif os.name == 'posix':  # macOS and Linux
+                import subprocess
+                if os.path.exists('/usr/bin/open'):  # macOS
+                    subprocess.Popen(['open', os.path.dirname(file_path)])
+                else:  # Linux
+                    try:
+                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+                    except Exception:
+                        pass  # Silently fail if unable to open file explorer
+        except Exception as exc:
+            logger.warning(f"Error showing file in explorer: {exc}")
+            # Non-critical error, just log it
