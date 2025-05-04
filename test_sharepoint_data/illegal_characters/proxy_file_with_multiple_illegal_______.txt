@@ -1,1 +1,0 @@
-This file represents file_with_multiple_illegal_*:?<>|.txt which couldn't be created directly
