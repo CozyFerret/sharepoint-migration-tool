@@ -1,17 +1,53 @@
+# Anthropic AI assistant configuration for SharePoint Migration Tool
+
+# Context definition - which files should be provided to the assistant for context
 context:
   paths:
-    - .mcp/
-    - README.md
-    - core/
-    - infrastructure/
-    - ui/
-    - utils/
+    - .mcp/                  # Model Context Protocol files
+    - README.md              # Project overview
+    - core/                  # Core functionality
+    - infrastructure/        # Infrastructure components
+    - ui/                    # User interface components
+    - utils/                 # Utility functions
+    - main.py                # Main application entry point
   
+  # Exclude large or binary files that don't provide useful context
+  exclude:
+    - '**/*.pyc'
+    - '**/__pycache__/**'
+    - 'venv/**'
+    - '.git/**'
+
+# Permission configuration - what operations the assistant can perform
 permissions:
   read:
-    - '**/*.py'
-    - '**/*.md'
+    - '**/*.py'              # All Python files
+    - '**/*.md'              # All Markdown files
+    - 'requirements.txt'     # Dependencies list
+    - '.github/**/*.yml'     # GitHub workflows
+  
   write:
-    - '**/*.py'
-    - '**/*.md'
-    - 'tests/**/*'
+    - '**/*.py'              # Can modify Python files
+    - '**/*.md'              # Can modify documentation
+    - 'tests/**/*.py'        # Can create/modify tests
+    - 'requirements.txt'     # Can update dependencies
+
+# Workflow integration settings
+workflow:
+  # Automatically suggest code improvements
+  suggest_improvements: true
+  
+  # Provide context when commenting on pull requests
+  comment_context: true
+  
+  # Automatically run tests on suggested changes
+  test_suggestions: true
+
+# Knowledge base configuration
+knowledge:
+  # Provide additional context from documentation
+  docs:
+    - '.mcp/project_overview.md'
+    - '.mcp/code_structure.md'
+    - '.mcp/technical_details.md'
+    - '.mcp/sharepoint_migration.md'
