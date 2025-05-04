@@ -129,8 +129,20 @@ class DataProcessor(QObject):
             if callbacks is None:
                 callbacks = {}
             
+            # Verify root_path exists
+            if not root_path or not os.path.exists(root_path):
+                if 'error' in callbacks:
+                    callbacks['error'](f"Invalid source directory: {root_path}")
+                return
+            
             # Initialize a new Scanner with the proper source_folder
-            self.scanner = Scanner(root_path)
+            try:
+                self.scanner = Scanner(root_path)
+            except Exception as scanner_init_error:
+                logger.error(f"Error initializing scanner: {scanner_init_error}")
+                if 'error' in callbacks:
+                    callbacks['error'](f"Error initializing scanner: {str(scanner_init_error)}")
+                return
             
             # Connect signals to callbacks - with error handling
             if 'progress' in callbacks:
@@ -139,27 +151,62 @@ class DataProcessor(QObject):
                     self.scanner.progress_updated.disconnect()
                 except:
                     pass  # Ignore if not already connected
-                self.scanner.progress_updated.connect(callbacks['progress'])
+                try:
+                    self.scanner.progress_updated.connect(callbacks['progress'])
+                except Exception as signal_error:
+                    logger.error(f"Error connecting progress signal: {signal_error}")
+                    # Continue despite error - non-critical
             
             if 'error' in callbacks:
                 try:
                     self.scanner.error_occurred.disconnect()
                 except:
                     pass  # Ignore if not already connected
-                self.scanner.error_occurred.connect(callbacks['error'])
+                try:
+                    self.scanner.error_occurred.connect(callbacks['error'])
+                except Exception as signal_error:
+                    logger.error(f"Error connecting error signal: {signal_error}")
+                    # This is critical - manual fallback
+                    orig_error_callback = callbacks['error']
+                    
+                    def error_wrapper(error_msg):
+                        try:
+                            orig_error_callback(error_msg)
+                        except:
+                            logger.error(f"Error in error callback: {error_msg}")
+                    
+                    self.error_callback_fallback = error_wrapper
             
             # Custom completion handler to transform data
             def on_scan_completed(results):
-                self._scan_completed(results, callbacks.get('scan_completed'))
+                try:
+                    self._scan_completed(results, callbacks.get('scan_completed'))
+                except Exception as completion_error:
+                    logger.error(f"Error in scan completion handler: {completion_error}")
+                    if 'error' in callbacks:
+                        callbacks['error'](f"Error processing scan results: {str(completion_error)}")
             
             try:
                 self.scanner.scan_completed.disconnect()
             except:
                 pass  # Ignore if not already connected
-            self.scanner.scan_completed.connect(on_scan_completed)
+                
+            try:
+                self.scanner.scan_completed.connect(on_scan_completed)
+            except Exception as signal_error:
+                logger.error(f"Error connecting scan_completed signal: {signal_error}")
+                if 'error' in callbacks:
+                    callbacks['error'](f"Error setting up scan completion handler: {str(signal_error)}")
+                return
             
             # Start the scanner thread by calling scan()
-            self.scanner.scan()
+            try:
+                self.scanner.scan()
+            except Exception as scan_error:
+                logger.error(f"Error starting scanner: {scan_error}")
+                if 'error' in callbacks:
+                    callbacks['error'](f"Error starting scan: {str(scan_error)}")
+                
         except Exception as e:
             logger.error(f"Error in start_scan: {e}")
             if 'error' in callbacks:

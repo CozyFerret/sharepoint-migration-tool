@@ -32,19 +32,35 @@ class Scanner(QThread):
         
         Returns:
             dict: Empty dictionary as a placeholder since the actual results 
-                  will be emitted via the scan_completed signal
+                will be emitted via the scan_completed signal
         """
-        logger.info(f"Starting scan thread for {self.source_folder}")
-        
-        # Start the thread which will run the 'run' method
-        if self.source_folder and os.path.exists(self.source_folder):
-            self.start()
-        else:
-            error_msg = f"Invalid source folder: {self.source_folder}"
-            logger.error(error_msg)
-            self.error_occurred.emit(error_msg)
+        try:
+            logger.info(f"Starting scan thread for {self.source_folder}")
             
-        return {}
+            # Verify source folder exists
+            if not self.source_folder or not os.path.exists(self.source_folder):
+                error_msg = f"Invalid source folder: {self.source_folder}"
+                logger.error(error_msg)
+                self.error_occurred.emit(error_msg)
+                return {}
+                
+            # Check if thread is already running
+            if self.isRunning():
+                logger.warning("Scan thread is already running")
+                return {}
+                
+            # Start the thread which will run the 'run' method
+            self.start()
+            return {}
+        
+        except Exception as e:
+            logger.error(f"Error in scan method: {str(e)}")
+            # Try to emit the error signal
+            try:
+                self.error_occurred.emit(f"Error starting scan: {str(e)}")
+            except:
+                pass  # Ignore if signal emission fails
+            return {}
         
     def run(self):
         """Main scanning method that runs in a separate thread"""
