@@ -56,25 +56,25 @@ class FileAnalysisTab(QWidget):
         scan_btn.clicked.connect(self.start_scan)
         
         # Scan options checkboxes
-        self.check_naming = QCheckBox("Check Naming")
-        self.check_naming.setChecked(True)
-        self.check_naming.setToolTip("Verify filenames against SharePoint naming rules")
+        check_naming = QCheckBox("Check Naming")
+        check_naming.setChecked(True)
+        check_naming.setToolTip("Verify filenames against SharePoint naming rules")
         
-        self.check_path_length = QCheckBox("Check Path Length")
-        self.check_path_length.setChecked(True)
-        self.check_path_length.setToolTip("Verify file paths against SharePoint path length limits")
+        check_path_length = QCheckBox("Check Path Length")
+        check_path_length.setChecked(True)
+        check_path_length.setToolTip("Verify file paths against SharePoint path length limits")
         
-        self.check_duplicates = QCheckBox("Find Duplicates")
-        self.check_duplicates.setChecked(True)
-        self.check_duplicates.setToolTip("Identify duplicate files based on content")
+        check_duplicates = QCheckBox("Find Duplicates")
+        check_duplicates.setChecked(True)
+        check_duplicates.setToolTip("Identify duplicate files based on content")
         
         # Add widgets to source layout
         source_layout.addWidget(source_label)
         source_layout.addWidget(self.source_edit, 1)  # 1 = stretch factor
         source_layout.addWidget(browse_btn)
-        source_layout.addWidget(self.check_naming)
-        source_layout.addWidget(self.check_path_length)
-        source_layout.addWidget(self.check_duplicates)
+        source_layout.addWidget(check_naming)
+        source_layout.addWidget(check_path_length)
+        source_layout.addWidget(check_duplicates)
         source_layout.addWidget(scan_btn)
         
         main_layout.addLayout(source_layout)
@@ -138,36 +138,6 @@ class FileAnalysisTab(QWidget):
             # Get DataFrames from scanner
             files_df, issues_df = self.scanner.get_results_as_dataframes()
             
-            # Process the DataFrames to add issue indicators to files
-            if issues_df is not None and not issues_df.empty and 'file_path' in issues_df.columns:
-                # Create a set of file paths with issues for faster lookup
-                files_with_issues = set(issues_df['file_path'].unique())
-                
-                # Add has_issues flag to files_df
-                if 'full_path' in files_df.columns:
-                    files_df['has_issues'] = files_df['full_path'].apply(
-                        lambda path: path in files_with_issues
-                    )
-                    
-                    # Add issue count to files_df
-                    issue_counts = issues_df['file_path'].value_counts().to_dict()
-                    files_df['issue_count'] = files_df['full_path'].apply(
-                        lambda path: issue_counts.get(path, 0)
-                    )
-                    
-                    # Add issue types to files_df
-                    issue_types = {}
-                    for _, issue in issues_df.iterrows():
-                        file_path = issue['file_path']
-                        issue_type = issue['issue_type']
-                        if file_path not in issue_types:
-                            issue_types[file_path] = set()
-                        issue_types[file_path].add(issue_type)
-                    
-                    files_df['issue_types'] = files_df['full_path'].apply(
-                        lambda path: ', '.join(issue_types.get(path, [])) if path in issue_types else ''
-                    )
-            
             # Update the file analysis view
             self.file_analysis_view.set_data(files_df, issues_df)
             
@@ -224,36 +194,6 @@ class FileAnalysisTab(QWidget):
             issues_df = results['issues_df']
         elif 'issues' in results and isinstance(results['issues'], list):
             issues_df = pd.DataFrame(results['issues'])
-        
-        # Process the DataFrames to add issue indicators to files
-        if files_df is not None and issues_df is not None and not issues_df.empty and 'file_path' in issues_df.columns:
-            # Create a set of file paths with issues for faster lookup
-            files_with_issues = set(issues_df['file_path'].unique())
-            
-            # Add has_issues flag to files_df
-            if 'full_path' in files_df.columns:
-                files_df['has_issues'] = files_df['full_path'].apply(
-                    lambda path: path in files_with_issues
-                )
-                
-                # Add issue count to files_df
-                issue_counts = issues_df['file_path'].value_counts().to_dict()
-                files_df['issue_count'] = files_df['full_path'].apply(
-                    lambda path: issue_counts.get(path, 0)
-                )
-                
-                # Add issue types to files_df
-                issue_types = {}
-                for _, issue in issues_df.iterrows():
-                    file_path = issue['file_path']
-                    issue_type = issue['issue_type']
-                    if file_path not in issue_types:
-                        issue_types[file_path] = set()
-                    issue_types[file_path].add(issue_type)
-                
-                files_df['issue_types'] = files_df['full_path'].apply(
-                    lambda path: ', '.join(issue_types.get(path, [])) if path in issue_types else ''
-                )
         
         # Update the file analysis view
         if files_df is not None:

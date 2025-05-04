@@ -14,8 +14,6 @@ This desktop application prepares local file systems for SharePoint migration by
   - Automatic Mode: Direct SharePoint upload after cleaning
 - Comprehensive scanning and analysis with detailed reports
 - User-friendly interface with visualization and detailed issue reporting
-- Detailed file-level analysis with comprehensive metadata
-- Interactive data grid with sorting, filtering, and export capabilities
 - Export functionality in multiple formats (CSV, Excel, JSON, Text)
 - Comprehensive testing suite for reliability
 
@@ -40,13 +38,6 @@ The application follows a modular design with clear separation between:
 - UI components
 - SharePoint integration
 - Testing infrastructure
-
-## New Features
-- **Enhanced File Scanner**: Collects comprehensive metadata including permissions, dates, owner, MIME type
-- **File Analysis View**: Interactive data grid for file-level analysis with sorting and filtering
-- **File Analysis Tab**: Integration of detailed file analysis into the main window
-- **Enhanced Issue Detection**: Detection of path issues, illegal characters, duplicates, and more
-- **Issue Display**: Detailed view of issues associated with each file
 
 ## Development Goals
 - Maintain clean, modular code structure

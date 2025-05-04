@@ -4,7 +4,6 @@
 
 ### Core
 - `scanner.py` - File system scanning with multithreading support
-- `file_scanner.py` - Enhanced file scanner with detailed metadata collection
 - `data_cleaner.py` - Implements file cleaning operations
 - `data_processor.py` - Orchestrates scanning, analysis, and cleaning
 
@@ -25,9 +24,6 @@
 ### UI
 - `main_window.py` - Main application window and controller
 - `dashboard.py` - Summary visualization of scan results
-- `enhanced_data_view.py` - Enhanced data grid with sorting and filtering
-- `file_analysis_view.py` - Detailed file-level analysis view
-- `file_analysis_tab.py` - Tab for file analysis integration
 - `analyzer_widget.py` - Detailed issue analysis interface
 - `results_widget.py` - Results viewing interface
 - `export_widget.py` - Export functionality
@@ -50,7 +46,6 @@
 sharepoint_migration_tool/
 ├── core/                   # Core scanning and analysis logic
 │   ├── scanner.py
-│   ├── file_scanner.py     # New enhanced file scanner
 │   ├── data_cleaner.py
 │   ├── data_processor.py
 │   ├── analyzers/
@@ -67,9 +62,6 @@ sharepoint_migration_tool/
 ├── ui/                     # User interface components
 │   ├── main_window.py
 │   ├── dashboard.py
-│   ├── enhanced_data_view.py
-│   ├── file_analysis_view.py # New detailed file view
-│   ├── file_analysis_tab.py  # New file analysis tab
 │   ├── analyzer_widget.py
 │   ├── results_widget.py
 │   ├── export_widget.py
@@ -101,7 +93,6 @@ sharepoint_migration_tool/
 - The UI layer uses the Data Processor for operations
 - Data Processor coordinates Analyzers, Fixers, and Scanner
 - Scanner provides raw file data to Analyzers
-- FileScanner provides detailed file metadata for FileAnalysisView
 - Fixers apply changes based on Analyzer results
 - SharePoint module integrates with the Data Cleaner for uploads
 - Test modules use mock classes to isolate components for unit testing
@@ -112,9 +103,6 @@ sharepoint_migration_tool/
 2. Scanner collects file metadata
 3. Analyzers process file metadata and identify issues
 4. UI displays results to user
-   a. Dashboard provides summary information
-   b. Analysis tab shows issue-based analysis
-   c. File Analysis tab shows detailed file-level analysis
 5. User initiates cleanup via Data Cleaner
 6. Fixers apply fixes to files based on analysis
 7. Data Cleaner copies fixed files or uploads to SharePoint

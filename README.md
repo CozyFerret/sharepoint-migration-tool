@@ -13,7 +13,7 @@ A Python-based desktop application for cleaning and preparing file systems for S
   - **Duplicate File Detection**: Finds exact and similar duplicates using hash comparison
   - **PII Detection**: PLACEHOLDER ONLY - Framework exists but no actual detection functionality yet
 
-### Enhanced Data View
+### Enhanced Data View (New)
 - **Interactive Data Grid**:
   - **Sorting**: Click any column header to sort data
   - **Filtering**: Filter by specific column values
@@ -22,21 +22,9 @@ A Python-based desktop application for cleaning and preparing file systems for S
   - Export analyzed data as CSV, Excel, JSON, or text files
   - Export only filtered/selected data
 
-### Detailed File Analysis (New)
-- **Comprehensive File Metadata**:
-  - File size, creation, modification, and access dates
-  - File permissions, owner, and attributes
-  - MIME type detection
-  - Path length analysis
-- **Interactive File Analysis View**:
-  - Color-coded issue highlighting
-  - Detailed view of issues for each file
-  - Advanced filtering by file properties and issue types
-  - Context menu for common operations
-
 ### Flexible Cleanup Options
 - **Manual Mode**: Non-destructively copies cleaned data to a new folder
-- **Automatic Mode**: Cleans data and uploads directly to SharePoint
+- **Automatic Mode (Enhanced)**: Cleans data and uploads directly to SharePoint
   - **Authentication**: Support for modern username/password and app-only authentication
   - **Document Library Selection**: Browse and select target document libraries
   - **Automatic Folder Creation**: Creates folder structure in SharePoint matching source
@@ -53,7 +41,6 @@ A Python-based desktop application for cleaning and preparing file systems for S
   - pandas (data processing)
   - pathlib (path manipulation)
   - Office365-REST-Python-Client (SharePoint integration)
-  - pywin32 (for Windows file permissions/ownership) - Windows only
   - See `requirements.txt` for full list
 
 ## Installation
@@ -93,11 +80,10 @@ A Python-based desktop application for cleaning and preparing file systems for S
 1. **Select the folder** you want to analyze using the "Browse" button
 2. **Configure which features** you want to use (Name Validation, Path Length, etc.)
 3. **Click "Start Scan"** to begin analysis
-4. **View results** in one of three tabs:
-   - **Dashboard**: Summary statistics and charts
-   - **Analysis**: Issue-based analysis with the enhanced data view
-   - **File Analysis**: Detailed file-level information and issue detection
-
+4. **View results** in the Analysis tab with the enhanced data view
+   - Use the search box to find specific files
+   - Filter by column values to focus on specific issues
+   - Sort by clicking column headers
 5. **Export reports** as needed using the "Export" button
 6. **Clean and prepare data** using either:
    - **Manual Mode**: Select a target folder for the cleaned files
@@ -113,18 +99,6 @@ A Python-based desktop application for cleaning and preparing file systems for S
    - Excel: For Microsoft Excel
    - JSON: For programmatic access
    - Text: For plain text representation
-
-### Using File Analysis View
-
-1. **Browse Files**: View all files in your selected directory
-2. **Filter Options**:
-   - **Show Issues Only**: Toggle to focus on files with issues
-   - **Issue Type**: Filter by specific issue types
-   - **Search**: Enter text to search file names, paths, or attributes
-3. **File Details**: Click on any file to see detailed information
-4. **Issue View**: See specific issues for the selected file
-5. **Context Menu**: Right-click for additional options
-6. **Export Options**: Export analysis in various formats
 
 ### SharePoint Integration
 
@@ -150,7 +124,6 @@ A Python-based desktop application for cleaning and preparing file systems for S
 sharepoint_migration_tool/
 ├── core/                # Core functionality
 │   ├── scanner.py       # File system scanning
-│   ├── file_scanner.py  # Enhanced file scanner with detailed metadata
 │   ├── data_cleaner.py  # Cleaning operations
 │   ├── data_processor.py # Process orchestration
 │   ├── analyzers/       # Analysis modules
@@ -165,12 +138,8 @@ sharepoint_migration_tool/
 ├── infrastructure/
 │   └── sharepoint.py    # SharePoint connectivity
 ├── ui/                  # User interface components
-│   ├── main_window.py   # Main application window
-│   ├── dashboard.py     # Dashboard visualization
-│   ├── enhanced_data_view.py  # Interactive data view
-│   ├── file_analysis_view.py  # Detailed file analysis view
-│   ├── file_analysis_tab.py   # File analysis tab integration
-│   └── migration_ui.py  # Migration interface
+│   ├── enhanced_data_view.py  # New interactive data view
+│   └── migration_ui.py        # Main migration interface
 ├── utils/               # Utility functions
 ├── resources/           # Application resources
 │   ├── icons/
@@ -187,7 +156,6 @@ sharepoint_migration_tool/
 - ✅ Manual cleaning mode (copy to new location)
 - ✅ Automatic SharePoint upload mode
 - ✅ Enhanced data view with sorting, filtering, and searching
-- ✅ Detailed file analysis with comprehensive metadata
 - ✅ Multi-format export functionality
 - ❌ PII Detection (placeholder only - framework exists but no actual detection yet)
 
