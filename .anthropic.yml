@@ -1,0 +1,17 @@
+context:
+  paths:
+    - .mcp/
+    - README.md
+    - core/
+    - infrastructure/
+    - ui/
+    - utils/
+  
+permissions:
+  read:
+    - '**/*.py'
+    - '**/*.md'
+  write:
+    - '**/*.py'
+    - '**/*.md'
+    - 'tests/**/*'
