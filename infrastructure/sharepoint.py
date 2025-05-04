@@ -1,362 +1,372 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-SharePoint integration module for SharePoint Data Migration Cleanup Tool.
-Handles authentication and file uploads to SharePoint sites.
+SharePoint Integration Module for Migration Tool
+Provides functionality for authentication, data cleaning and automatic upload to SharePoint
 """
 
-import os
 import logging
-import time
+import os
+import shutil
+import tempfile
 from pathlib import Path
-import requests
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
-import pandas as pd
+from typing import List, Dict, Optional, Tuple
 
-logger = logging.getLogger('sharepoint_migration_tool')
+from office365.runtime.auth.authentication_context import AuthenticationContext
+from office365.sharepoint.client_context import ClientContext
+from office365.sharepoint.files.file import File
+from office365.sharepoint.folders.folder import Folder
 
-class SharePointAuth:
-    """Handles authentication with SharePoint"""
+from core.data_cleaner import DataCleaner
+from core.analyzers.name_validator import NameValidator
+from core.analyzers.path_analyzer import PathAnalyzer
+from core.fixers.name_fixer import NameFixer
+from core.fixers.path_shortener import PathShortener
+
+logger = logging.getLogger(__name__)
+
+class SharePointIntegration:
+    """
+    Handles authentication, data cleaning, and uploading to SharePoint
+    """
     
-    def __init__(self, site_url, username=None, password=None, auth_method="modern"):
+    def __init__(self):
+        self.ctx = None  # SharePoint context
+        self.site_url = None
+        self.temp_dir = None  # Temporary directory for cleaned files
+        self.data_cleaner = DataCleaner()
+        
+    def authenticate(self, site_url: str, username: str, password: str) -> bool:
         """
-        Initialize SharePoint authentication
+        Authenticate with SharePoint using username and password
         
         Args:
-            site_url (str): The SharePoint site URL
-            username (str, optional): Username for authentication
-            password (str, optional): Password for authentication
-            auth_method (str): Authentication method ('modern', 'legacy', 'app')
-        """
-        self.site_url = site_url
-        self.username = username
-        self.password = password
-        self.auth_method = auth_method
-        self.token = None
-        self.expires = 0
-        
-    def authenticate(self):
-        """
-        Authenticate with SharePoint and obtain access token
-        
+            site_url: SharePoint site URL
+            username: User's email/username
+            password: User's password
+            
         Returns:
-            bool: True if authentication was successful
+            bool: True if authentication successful, False otherwise
         """
         try:
-            if self.auth_method == "modern":
-                return self._auth_modern()
-            elif self.auth_method == "legacy":
-                return self._auth_legacy()
-            elif self.auth_method == "app":
-                return self._auth_app()
+            auth_context = AuthenticationContext(site_url)
+            success = auth_context.acquire_token_for_user(username, password)
+            
+            if success:
+                self.ctx = ClientContext(site_url, auth_context)
+                self.site_url = site_url
+                logger.info(f"Successfully authenticated to {site_url}")
+                return True
             else:
-                logger.error(f"Unsupported authentication method: {self.auth_method}")
+                logger.error(f"Authentication failed: {auth_context.get_last_error()}")
                 return False
+                
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}")
             return False
             
-    def _auth_modern(self):
+    def authenticate_modern(self, site_url: str, client_id: str, client_secret: str) -> bool:
         """
-        Authenticate using modern authentication (OAuth)
-        
-        Returns:
-            bool: True if authentication was successful
-        """
-        # In a real implementation, this would use the Microsoft Authentication Library (MSAL)
-        # For this example, we're implementing a placeholder that simulates successful auth
-        logger.info("Authenticating with SharePoint using modern authentication")
-        
-        # Simulate token acquisition
-        self.token = "simulated_token_for_example_only"
-        self.expires = time.time() + 3600  # 1 hour expiry
-        
-        logger.info("Authentication successful")
-        return True
-            
-    def _auth_legacy(self):
-        """
-        Authenticate using legacy authentication (username/password)
-        
-        Returns:
-            bool: True if authentication was successful
-        """
-        # This is a placeholder for legacy authentication methods
-        logger.info("Authenticating with SharePoint using legacy authentication")
-        
-        if not self.username or not self.password:
-            logger.error("Username and password required for legacy authentication")
-            return False
-            
-        # Simulate authentication
-        self.token = "simulated_legacy_token"
-        self.expires = time.time() + 3600  # 1 hour expiry
-        
-        logger.info("Legacy authentication successful")
-        return True
-            
-    def _auth_app(self):
-        """
-        Authenticate using app-only authentication
-        
-        Returns:
-            bool: True if authentication was successful
-        """
-        # This is a placeholder for app-only authentication
-        logger.info("Authenticating with SharePoint using app-only authentication")
-        
-        # Simulate authentication
-        self.token = "simulated_app_token"
-        self.expires = time.time() + 3600  # 1 hour expiry
-        
-        logger.info("App authentication successful")
-        return True
-            
-    def get_auth_header(self):
-        """
-        Get the authentication header for API requests
-        
-        Returns:
-            dict: Authentication header
-        """
-        # Check if token is expired
-        if time.time() > self.expires:
-            logger.info("Token expired, reauthenticating")
-            self.authenticate()
-            
-        return {"Authorization": f"Bearer {self.token}"}
-        
-    def validate_connection(self):
-        """
-        Validate the SharePoint connection
-        
-        Returns:
-            bool: True if connection is valid
-        """
-        try:
-            # In a real implementation, this would make a simple API call to verify connectivity
-            logger.info("Validating SharePoint connection")
-            
-            # Simulate successful validation
-            time.sleep(1)  # Simulate network delay
-            
-            return True
-        except Exception as e:
-            logger.error(f"Connection validation error: {str(e)}")
-            return False
-
-
-class SharePointUploader(QObject):
-    """Worker for uploading files to SharePoint"""
-    
-    # Define signals
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    error = pyqtSignal(str)
-    file_uploaded = pyqtSignal(str)
-    finished = pyqtSignal()
-    
-    def __init__(self, auth, files_to_upload, target_library, create_folders=True):
-        """
-        Initialize the uploader
+        Authenticate with SharePoint using modern authentication (app-only)
         
         Args:
-            auth (SharePointAuth): Authentication provider
-            files_to_upload (dict): Dictionary mapping source paths to target paths
-            target_library (str): Target document library
-            create_folders (bool): Whether to create folder structure
-        """
-        super().__init__()
-        self.auth = auth
-        self.files_to_upload = files_to_upload
-        self.target_library = target_library
-        self.create_folders = create_folders
-        self.should_stop = False
-        
-    def stop(self):
-        """Signal the worker to stop uploading"""
-        self.should_stop = True
-        
-    def upload(self):
-        """
-        Upload files to SharePoint
-        
-        Emits:
-            progress: Percentage completion
-            status: Current status message
-            error: Error message if any
-            file_uploaded: Path of successfully uploaded file
-            finished: Signal when all uploads are complete
+            site_url: SharePoint site URL
+            client_id: Azure AD application client ID
+            client_secret: Azure AD application client secret
+            
+        Returns:
+            bool: True if authentication successful, False otherwise
         """
         try:
-            total_files = len(self.files_to_upload)
-            if total_files == 0:
-                self.status.emit("No files to upload")
-                self.finished.emit()
-                return
+            auth_context = AuthenticationContext(site_url)
+            success = auth_context.acquire_token_for_app(client_id, client_secret)
+            
+            if success:
+                self.ctx = ClientContext(site_url, auth_context)
+                self.site_url = site_url
+                logger.info(f"Successfully authenticated to {site_url} using app-only auth")
+                return True
+            else:
+                logger.error(f"App-only authentication failed: {auth_context.get_last_error()}")
+                return False
                 
-            self.status.emit(f"Starting upload of {total_files} files")
-            
-            # Validate connection before starting
-            if not self.auth.validate_connection():
-                self.error.emit("SharePoint connection failed. Please check credentials and try again.")
-                return
-                
-            # Process each file
-            processed_files = 0
-            
-            for source_path, target_path in self.files_to_upload.items():
-                # Check if we should stop
-                if self.should_stop:
-                    self.status.emit("Upload cancelled")
-                    break
-                    
-                try:
-                    # Update status
-                    file_name = os.path.basename(source_path)
-                    self.status.emit(f"Uploading {file_name}")
-                    
-                    # In a real implementation, this would actually upload the file
-                    # For this example, we're simulating the upload process
-                    self._simulate_upload(source_path, target_path)
-                    
-                    # Signal that the file was uploaded
-                    self.file_uploaded.emit(source_path)
-                    
-                    # Update progress
-                    processed_files += 1
-                    progress_percent = int((processed_files / total_files) * 100)
-                    self.progress.emit(progress_percent)
-                    
-                except Exception as e:
-                    logger.error(f"Error uploading {source_path}: {str(e)}")
-                    # Continue with next file
-            
-            # Upload completion
-            self.status.emit(f"Upload complete. Processed {processed_files} of {total_files} files.")
-            self.finished.emit()
-            
         except Exception as e:
-            logger.error(f"Error during file upload: {str(e)}")
-            self.error.emit(f"Upload error: {str(e)}")
-            
-    def _simulate_upload(self, source_path, target_path):
-        """
-        Simulate file upload for demonstration purposes
-        
-        Args:
-            source_path (str): Source file path
-            target_path (str): Target path in SharePoint
-        """
-        # This method simulates a file upload
-        # In a real implementation, this would use the SharePoint REST API or CSOM
-        
-        # Check if file exists
-        if not os.path.exists(source_path):
-            raise FileNotFoundError(f"Source file not found: {source_path}")
-            
-        # Get file size for realistic simulation
-        file_size = os.path.getsize(source_path)
-        
-        # Simulate upload time based on file size (very rough approximation)
-        # Simulate 1MB/s upload speed
-        upload_time = max(0.5, file_size / (1024 * 1024))
-        
-        # Cap simulation time to not slow down testing
-        upload_time = min(upload_time, 2.0)
-        
-        # Simulate network latency
-        time.sleep(upload_time)
-        
-        logger.info(f"Simulated upload of {source_path} to {target_path}")
-
-
-class SharePointUploadManager:
-    """Manager for SharePoint uploads"""
-    
-    def __init__(self):
-        """Initialize the upload manager"""
-        self.auth = None
-        self.thread = None
-        self.uploader = None
-        
-    def configure(self, site_url, auth_method="modern", username=None, password=None):
-        """
-        Configure the SharePoint connection
-        
-        Args:
-            site_url (str): SharePoint site URL
-            auth_method (str): Authentication method
-            username (str, optional): Username for authentication
-            password (str, optional): Password for authentication
-            
-        Returns:
-            bool: True if configuration is successful
-        """
-        try:
-            self.auth = SharePointAuth(site_url, username, password, auth_method)
-            return self.auth.authenticate()
-        except Exception as e:
-            logger.error(f"Error configuring SharePoint: {str(e)}")
+            logger.error(f"Authentication error: {str(e)}")
             return False
             
-    def start_upload(self, files_to_upload, target_library, create_folders=True, 
-                    progress_callback=None, status_callback=None, error_callback=None, 
-                    file_uploaded_callback=None, finished_callback=None):
+    def clean_and_export_data(self, source_dir: str, target_dir: str, 
+                              fix_names: bool = True, fix_paths: bool = True, 
+                              remove_duplicates: bool = False) -> Tuple[bool, str, List[str]]:
         """
-        Start uploading files to SharePoint
+        Clean data and export to a target directory without uploading to SharePoint
         
         Args:
-            files_to_upload (dict): Dictionary mapping source paths to target paths
-            target_library (str): Target document library
-            create_folders (bool): Whether to create folder structure
-            progress_callback (function): Callback for progress updates
-            status_callback (function): Callback for status messages
-            error_callback (function): Callback for error messages
-            file_uploaded_callback (function): Callback when a file is uploaded
-            finished_callback (function): Callback when all uploads are complete
+            source_dir: Source directory with original files
+            target_dir: Target directory for cleaned files
+            fix_names: Whether to fix invalid SharePoint names
+            fix_paths: Whether to shorten paths exceeding SharePoint limits
+            remove_duplicates: Whether to remove duplicate files
+            
+        Returns:
+            Tuple containing:
+                bool: Success indicator
+                str: Path to cleaned data
+                List[str]: List of issues encountered
         """
-        # Make sure we have authentication
-        if not self.auth:
-            if error_callback:
-                error_callback("SharePoint not configured. Please configure connection first.")
+        issues = []
+        
+        try:
+            # Create target directory if it doesn't exist
+            os.makedirs(target_dir, exist_ok=True)
+            
+            # Set up analyzers and fixers
+            analyzers = []
+            fixers = []
+            
+            if fix_names:
+                analyzers.append(NameValidator())
+                fixers.append(NameFixer())
+                
+            if fix_paths:
+                analyzers.append(PathAnalyzer())
+                fixers.append(PathShortener())
+                
+            # Configure data cleaner
+            self.data_cleaner.set_analyzers(analyzers)
+            self.data_cleaner.set_fixers(fixers)
+            self.data_cleaner.set_source(source_dir)
+            self.data_cleaner.set_target(target_dir)
+            
+            # Execute cleaning
+            result = self.data_cleaner.clean(remove_duplicates=remove_duplicates)
+            
+            # Collect issues
+            issues = self.data_cleaner.get_issues()
+            
+            logger.info(f"Data cleaning completed. {len(issues)} issues found.")
+            return True, target_dir, issues
+            
+        except Exception as e:
+            logger.error(f"Error during data cleaning: {str(e)}")
+            issues.append(f"Critical error: {str(e)}")
+            return False, "", issues
+            
+    def clean_and_upload(self, source_dir: str, target_library: str,
+                         fix_names: bool = True, fix_paths: bool = True,
+                         remove_duplicates: bool = False) -> Tuple[bool, List[str], Dict]:
+        """
+        Clean data and upload directly to SharePoint
+        
+        Args:
+            source_dir: Source directory with original files
+            target_library: Target SharePoint document library
+            fix_names: Whether to fix invalid SharePoint names
+            fix_paths: Whether to shorten paths exceeding SharePoint limits
+            remove_duplicates: Whether to remove duplicate files
+            
+        Returns:
+            Tuple containing:
+                bool: Success indicator
+                List[str]: List of issues encountered
+                Dict: Dictionary with upload statistics
+        """
+        issues = []
+        stats = {
+            "total_files": 0,
+            "uploaded_files": 0,
+            "failed_files": 0,
+            "total_size_bytes": 0
+        }
+        
+        if not self.ctx:
+            issues.append("Not authenticated to SharePoint. Please sign in first.")
+            return False, issues, stats
+            
+        try:
+            # Create a temporary directory for cleaned files
+            self.temp_dir = tempfile.mkdtemp(prefix="sp_migration_")
+            
+            # Clean the data
+            success, temp_path, cleaning_issues = self.clean_and_export_data(
+                source_dir, self.temp_dir, fix_names, fix_paths, remove_duplicates
+            )
+            
+            issues.extend(cleaning_issues)
+            
+            if not success:
+                issues.append("Failed to clean the data before upload.")
+                return False, issues, stats
+                
+            # Upload the cleaned files
+            upload_success, upload_issues, upload_stats = self._upload_directory(
+                self.temp_dir, target_library
+            )
+            
+            issues.extend(upload_issues)
+            stats.update(upload_stats)
+            
+            return upload_success, issues, stats
+            
+        except Exception as e:
+            logger.error(f"Error during clean and upload: {str(e)}")
+            issues.append(f"Critical error: {str(e)}")
+            return False, issues, stats
+            
+        finally:
+            # Clean up the temporary directory
+            if self.temp_dir and os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+                
+    def _upload_directory(self, local_dir: str, target_library: str) -> Tuple[bool, List[str], Dict]:
+        """
+        Upload a directory to SharePoint recursively
+        
+        Args:
+            local_dir: Local directory path to upload
+            target_library: Target SharePoint document library
+            
+        Returns:
+            Tuple containing:
+                bool: Success indicator
+                List[str]: List of issues encountered
+                Dict: Dictionary with upload statistics
+        """
+        issues = []
+        stats = {
+            "total_files": 0,
+            "uploaded_files": 0,
+            "failed_files": 0,
+            "total_size_bytes": 0
+        }
+        
+        if not self.ctx:
+            issues.append("Not authenticated to SharePoint.")
+            return False, issues, stats
+            
+        try:
+            # Ensure target library exists
+            target_folder = self.ctx.web.get_folder_by_server_relative_url(target_library)
+            self.ctx.load(target_folder)
+            self.ctx.execute_query()
+            
+            # Process all files and directories recursively
+            for root, dirs, files in os.walk(local_dir):
+                for file in files:
+                    local_file_path = os.path.join(root, file)
+                    
+                    # Calculate the relative path from the source directory
+                    rel_path = os.path.relpath(local_file_path, local_dir)
+                    target_file_path = f"{target_library}/{rel_path.replace(os.sep, '/')}"
+                    
+                    # Upload the file
+                    try:
+                        stats["total_files"] += 1
+                        file_size = os.path.getsize(local_file_path)
+                        stats["total_size_bytes"] += file_size
+                        
+                        with open(local_file_path, 'rb') as file_content:
+                            file_content_bytes = file_content.read()
+                            
+                        # Create parent folders if needed
+                        self._ensure_folders_exist(target_file_path)
+                        
+                        # Upload the file
+                        File.save_binary(self.ctx, target_file_path, file_content_bytes)
+                        self.ctx.execute_query()
+                        
+                        logger.info(f"Uploaded: {rel_path} -> {target_file_path}")
+                        stats["uploaded_files"] += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to upload {rel_path}: {str(e)}")
+                        issues.append(f"Failed to upload {rel_path}: {str(e)}")
+                        stats["failed_files"] += 1
+                        
+            success = stats["failed_files"] == 0
+            return success, issues, stats
+            
+        except Exception as e:
+            logger.error(f"Error during directory upload: {str(e)}")
+            issues.append(f"Error accessing target library: {str(e)}")
+            return False, issues, stats
+            
+    def _ensure_folders_exist(self, file_path: str) -> None:
+        """
+        Ensure all parent folders exist for a given file path
+        
+        Args:
+            file_path: SharePoint file path
+        """
+        # Split the path into segments
+        path_parts = file_path.split('/')
+        
+        # Remove the file name (last part)
+        folder_parts = path_parts[:-1]
+        
+        if len(folder_parts) <= 1:
+            # File is in the root of the document library, no folders to create
             return
             
-        # Create worker thread
-        self.thread = QThread()
-        self.uploader = SharePointUploader(self.auth, files_to_upload, target_library, create_folders)
-        self.uploader.moveToThread(self.thread)
+        # Build the folder path incrementally and create each folder if it doesn't exist
+        current_path = folder_parts[0]  # Start with the document library
         
-        # Connect signals
-        self.thread.started.connect(self.uploader.upload)
-        
-        if progress_callback:
-            self.uploader.progress.connect(progress_callback)
+        for i in range(1, len(folder_parts)):
+            current_path += f"/{folder_parts[i]}"
             
-        if status_callback:
-            self.uploader.status.connect(status_callback)
-            
-        if error_callback:
-            self.uploader.error.connect(error_callback)
-            
-        if file_uploaded_callback:
-            self.uploader.file_uploaded.connect(file_uploaded_callback)
-            
-        # Connect the finished signal
-        def on_finished():
-            self.thread.quit()
-            if finished_callback:
-                finished_callback()
+            try:
+                folder = self.ctx.web.get_folder_by_server_relative_url(current_path)
+                self.ctx.load(folder)
+                self.ctx.execute_query()
                 
-        self.uploader.finished.connect(on_finished)
+                # Folder exists, continue
+                continue
+                
+            except Exception:
+                # Folder doesn't exist, create it
+                parent_path = '/'.join(folder_parts[:i])
+                folder_name = folder_parts[i]
+                
+                parent_folder = self.ctx.web.get_folder_by_server_relative_url(parent_path)
+                parent_folder.folders.add(folder_name)
+                self.ctx.execute_query()
+                
+                logger.info(f"Created folder: {current_path}")
+                
+    def get_document_libraries(self) -> List[str]:
+        """
+        Get a list of document libraries in the SharePoint site
         
-        # Start the thread
-        logger.info(f"Starting upload of {len(files_to_upload)} files")
-        self.thread.start()
+        Returns:
+            List[str]: List of document library names
+        """
+        if not self.ctx:
+            logger.error("Not authenticated to SharePoint.")
+            return []
+            
+        try:
+            # Load all lists that are document libraries
+            lists = self.ctx.web.lists
+            self.ctx.load(lists, ["Title", "BaseTemplate"])
+            self.ctx.execute_query()
+            
+            # Filter for document libraries (base template 101)
+            doc_libraries = [lst.properties["Title"] for lst in lists 
+                            if lst.properties["BaseTemplate"] == 101]
+            
+            return doc_libraries
+            
+        except Exception as e:
+            logger.error(f"Error getting document libraries: {str(e)}")
+            return []
+            
+    def disconnect(self) -> None:
+        """
+        Disconnect from SharePoint and clean up resources
+        """
+        self.ctx = None
+        self.site_url = None
         
-    def stop_upload(self):
-        """Stop an ongoing upload"""
-        if self.uploader and self.thread and self.thread.isRunning():
-            logger.info("Stopping upload")
-            self.uploader.stop()
+        # Clean up temporary directory if it exists
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+            self.temp_dir = None
+            
+        logger.info("Disconnected from SharePoint")
