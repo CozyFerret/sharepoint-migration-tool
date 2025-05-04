@@ -1,165 +1,94 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Path length analyzer for SharePoint Data Migration Cleanup Tool.
-Identifies paths that exceed SharePoint's length limitations.
-"""
-
+# core/analyzers/path_analyzer.py
 import os
-import logging
 import pandas as pd
-from pathlib import Path
+import logging
 
+# Configure logger
 logger = logging.getLogger('sharepoint_migration_tool')
 
 class PathAnalyzer:
-    """Analyzes path lengths against SharePoint limitations"""
+    """Analyzes file paths for SharePoint compatibility issues"""
     
     def __init__(self, config=None):
         """
-        Initialize the path analyzer
+        Initialize the path analyzer with configuration
         
         Args:
-            config (dict): Configuration settings
+            config (dict): Configuration options
         """
         self.config = config or {}
-        self.max_path_length = self.config.get('sharepoint', {}).get('max_path_length', 256)
         
+        # SharePoint path length limit (default 256)
+        self.max_path_length = self.config.get('max_path_length', 256)
+        
+        # SharePoint URL length limit
+        self.max_url_length = self.config.get('max_url_length', 400)
+        
+        logger.info("PathAnalyzer initialized")
+    
     def analyze_dataframe(self, df):
         """
-        Analyze a DataFrame of files to identify path length issues
+        Analyze a dataframe of files for path length issues
         
         Args:
-            df (pandas.DataFrame): DataFrame containing file information
+            df (pandas.DataFrame): DataFrame with file data
             
         Returns:
-            pandas.DataFrame: DataFrame with added columns for path length analysis
+            pandas.DataFrame: The input DataFrame with additional path analysis columns
         """
-        logger.info(f"Analyzing path lengths (max allowed: {self.max_path_length} characters)")
-        
-        # Create a copy to avoid modifying the original
-        result_df = df.copy()
-        
-        # Ensure path_length column exists
-        if 'path_length' not in result_df.columns:
-            result_df['path_length'] = result_df['path'].apply(len)
+        try:
+            logger.info("Analyzing path lengths for SharePoint compatibility")
             
-        # Add path analysis columns
-        result_df['path_too_long'] = result_df['path_length'] > self.max_path_length
-        result_df['suggested_path'] = None
-        
-        # Generate suggested paths for long paths
-        for index, row in result_df.iterrows():
-            if row['path_too_long']:
-                result_df.at[index, 'suggested_path'] = self._suggest_shorter_path(row['path'])
-        
-        # Summary statistics
-        long_paths_count = len(result_df[result_df['path_too_long'] == True])
-        total_count = len(result_df)
-        logger.info(f"Found {long_paths_count} of {total_count} files with paths exceeding {self.max_path_length} characters")
-        
-        return result_df
-        
-    def _suggest_shorter_path(self, original_path):
-        """
-        Suggest a shorter path that complies with SharePoint's length limitation
-        
-        Args:
-            original_path (str): Original path to shorten
+            # Create a copy to avoid modifying the original
+            result_df = df.copy()
             
-        Returns:
-            str: Suggested shorter path
-        """
-        # Basic path shortening strategy:
-        # 1. Get the file name and extension
-        # 2. Preserve as much of the original path structure as possible
-        
-        path_obj = Path(original_path)
-        file_name = path_obj.name
-        
-        # Strategy 1: Keep the filename and shorten parent directories
-        if len(file_name) < self.max_path_length - 30:  # Allow some room for shortened path
-            # Get the drive or root
-            drive = os.path.splitdrive(original_path)[0]
+            # Add default analysis columns
+            result_df['path_too_long'] = False
+            result_df['path_length'] = 0
+            result_df['url_too_long'] = False
+            result_df['url_length'] = 0
             
-            # Create a shorter path by abbreviating directories
-            parts = path_obj.parts
-            
-            # Keep the first two directory levels (after drive) and the filename
-            if len(parts) > 3:
-                shortened_parts = list(parts[:3])  # Drive + first two directory levels
+            # Skip if DataFrame is empty
+            if result_df.empty:
+                logger.warning("Empty DataFrame provided to path analyzer")
+                return result_df
                 
-                # Add placeholder for skipped directories
-                if len(parts) > 4:
-                    shortened_parts.append("...")
-                    
-                # Add the last directory and filename
-                shortened_parts.extend(parts[-2:])
+            # Check if required columns exist
+            if 'path' not in result_df.columns:
+                logger.warning("DataFrame missing 'path' column")
+                return result_df
                 
-                # Join the parts
-                shortened_path = os.path.join(*shortened_parts)
+            # Process each file
+            for idx, row in result_df.iterrows():
+                file_path = row.get('path', '')
                 
-                # Check if it's short enough
-                if len(shortened_path) <= self.max_path_length:
-                    return shortened_path
+                # Calculate path length
+                path_length = len(file_path)
+                result_df.at[idx, 'path_length'] = path_length
+                
+                # Check if path is too long
+                if path_length > self.max_path_length:
+                    result_df.at[idx, 'path_too_long'] = True
+                
+                # Estimate URL length (approximate)
+                # In SharePoint, URLs are often longer than file paths due to
+                # additional components like site URL, library name, etc.
+                url_length = path_length + 50  # Add buffer for SharePoint URL components
+                result_df.at[idx, 'url_length'] = url_length
+                
+                if url_length > self.max_url_length:
+                    result_df.at[idx, 'url_too_long'] = True
             
-        # Strategy 2: If still too long, create a more drastically shortened path
-        if len(file_name) < self.max_path_length - 10:
-            drive = os.path.splitdrive(original_path)[0]
-            shortened_path = os.path.join(drive, "ShortenedPath", file_name)
+            # Count issues
+            path_issues = len(result_df[result_df['path_too_long'] == True])
+            url_issues = len(result_df[result_df['url_too_long'] == True])
             
-            # Check if it's short enough
-            if len(shortened_path) <= self.max_path_length:
-                return shortened_path
-        
-        # Strategy 3: If filename itself is very long, truncate it
-        name, ext = os.path.splitext(file_name)
-        if len(name) > 30:
-            shortened_name = name[:27] + "..."
-            shortened_file = shortened_name + ext
+            logger.info(f"Found {path_issues} files with path length issues")
+            logger.info(f"Found {url_issues} files with potential URL length issues")
             
-            drive = os.path.splitdrive(original_path)[0]
-            shortened_path = os.path.join(drive, "ShortenedPath", shortened_file)
+            return result_df
             
-            # Check if it's short enough
-            if len(shortened_path) <= self.max_path_length:
-                return shortened_path
-        
-        # Final fallback: Create a minimal path if all else fails
-        drive = os.path.splitdrive(original_path)[0]
-        name, ext = os.path.splitext(file_name)
-        name = name[:20] if len(name) > 20 else name  # Ensure name isn't too long
-        shortened_path = os.path.join(drive, "SP", name + ext)
-        
-        return shortened_path
-        
-    def get_path_stats(self, df):
-        """
-        Get statistics about path length analysis
-        
-        Args:
-            df (pandas.DataFrame): DataFrame with path length analysis
-            
-        Returns:
-            dict: Statistics about path lengths
-        """
-        if 'path_too_long' not in df.columns:
-            return {
-                'total_files': len(df),
-                'long_paths': 0,
-                'average_length': 0,
-                'max_length': 0,
-                'long_path_percentage': 0
-            }
-            
-        total_files = len(df)
-        long_paths = len(df[df['path_too_long'] == True])
-        
-        return {
-            'total_files': total_files,
-            'long_paths': long_paths,
-            'average_length': df['path_length'].mean(),
-            'max_length': df['path_length'].max(),
-            'long_path_percentage': (long_paths / total_files * 100) if total_files > 0 else 0
-        }
+        except Exception as e:
+            logger.error(f"Error in path analysis: {str(e)}")
+            # Return the original DataFrame if an error occurs
+            return df

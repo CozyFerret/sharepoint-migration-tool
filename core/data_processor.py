@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# core/data_processor.py
 
 """
 Data processor for SharePoint Data Migration Cleanup Tool.
@@ -11,6 +10,8 @@ import logging
 import tempfile
 import pandas as pd
 import threading
+import shutil
+from PyQt5.QtCore import QObject, pyqtSignal
 
 from core.scanner import Scanner
 from core.analyzers.name_validator import SharePointNameValidator
@@ -18,10 +19,19 @@ from core.analyzers.path_analyzer import PathAnalyzer
 from core.analyzers.duplicate_finder import DuplicateFinder
 from core.analyzers.pii_detector import PIIDetector
 
+# Import the fixers
+from core.fixers.name_fixer import NameFixer
+from core.fixers.path_shortener import PathShortener
+from core.fixers.deduplicator import Deduplicator
+from core.fixers.permission_fixer import PermissionFixer
+
 logger = logging.getLogger('sharepoint_migration_tool')
 
-class DataProcessor:
+class DataProcessor(QObject):
     """Integrates scanning, analysis, and cleaning operations"""
+    
+    # Define the signal
+    progress_updated = pyqtSignal(int)
     
     def __init__(self, config=None):
         """
@@ -30,6 +40,7 @@ class DataProcessor:
         Args:
             config (dict): Configuration settings
         """
+        super().__init__()  # Make sure to call the QObject constructor
         self.config = config or {}
         
         # Initialize components
@@ -37,7 +48,7 @@ class DataProcessor:
         self.name_validator = SharePointNameValidator(self.config)
         self.path_analyzer = PathAnalyzer(self.config)
         self.duplicate_finder = DuplicateFinder(self.config)
-        self.pii_detector = PIIDetector(self.config)
+        self.pii_detector = PIIDetector()  # Fixed initialization
         
         # Store state
         self.scan_data = None
@@ -47,6 +58,35 @@ class DataProcessor:
         # Thread tracking
         self.scan_thread = None
         self.analysis_thread = None
+    
+    def scan_and_analyze(self, root_path):
+        """
+        Scan and analyze a directory
+        
+        Args:
+            root_path (str): The root path to scan
+            
+        Returns:
+            dict: Analysis results
+        """
+        # Create a new scanner
+        self.scanner = Scanner(root_path)
+        
+        # Connect progress signal
+        self.scanner.progress_updated.connect(self.progress_updated)
+        
+        # Scan the directory - start the thread via the scan method
+        self.scanner.scan()
+        
+        # We can't return the results immediately as scanning is now asynchronous
+        # Instead, we'll need to connect to the scan_completed signal
+        # and process the results there
+        
+        # For compatibility with old code, we'll return an empty dict
+        return {
+            'file_data': None,
+            'issues_data': {}
+        }
         
     def start_scan(self, root_path, scan_options=None, callbacks=None):
         """
@@ -77,8 +117,8 @@ class DataProcessor:
         
         self.scanner.scan_completed.connect(on_scan_completed)
         
-        # Start the scanner thread
-        self.scanner.start()
+        # Start the scanner thread by calling scan()
+        self.scanner.scan()
         
     def _scan_completed(self, results, callback=None):
         """
@@ -435,3 +475,206 @@ class DataProcessor:
         # Simulate upload completion
         if callbacks.get('upload_completed'):
             callbacks['upload_completed'](cleaned_files)
+    
+    def fix_issues(self, params):
+        """
+        Apply fixing strategies to resolve detected issues
+        
+        Args:
+            params: Dict containing fixing parameters
+            
+        Returns:
+            dict: Results of the fixing operation
+        """
+        file_data = params.get('file_data')
+        issues_data = params.get('issues_data')
+        output_dir = params.get('output_dir')
+        strategies = params.get('strategies')
+        
+        # Initialize counters
+        results = {
+            'path_fixed': 0,
+            'name_fixed': 0,
+            'duplicates_fixed': 0,
+            'permissions_fixed': 0,
+            'total_fixed': 0
+        }
+        
+        # Create fixers based on selected strategies
+        name_fixer = NameFixer(strategies.get('illegal_chars')) if strategies.get('illegal_chars') else None
+        path_shortener = PathShortener(strategies.get('path_length')) if strategies.get('path_length') else None
+        deduplicator = Deduplicator(strategies.get('duplicates')) if strategies.get('duplicates') else None
+        permission_fixer = PermissionFixer() if strategies.get('permissions') else None
+        
+        # Get list of all files to process
+        all_files = file_data['path'].unique().tolist()
+        total_files = len(all_files)
+        processed = 0
+        
+        # Create output directory if it doesn't exist
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Create log directory for tracking changes
+        log_dir = os.path.join(output_dir, '_migration_logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # Prepare log file
+        log_file = os.path.join(log_dir, f'migration_log_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.csv')
+        log_columns = ['original_path', 'new_path', 'issue_type', 'action_taken']
+        log_df = pd.DataFrame(columns=log_columns)
+        
+        # Handle duplicates first (since some may be excluded)
+        duplicate_groups = []
+        if deduplicator and 'duplicates' in issues_data:
+            # Group duplicates by hash
+            dup_files = issues_data.get('duplicates', [])
+            # This is a placeholder - in reality, you would need to have a way to group duplicates by content hash
+            # For simplicity, we'll assume duplicate_groups is already in the correct format
+            # [[file1, file2], [file3, file4, file5], ...]
+            
+            # Process duplicates
+            dup_decisions = deduplicator.resolve_duplicates(duplicate_groups, file_data)
+            
+            # Keep track of files to skip (duplicates that will be excluded)
+            files_to_skip = []
+            for to_keep, to_remove in dup_decisions.items():
+                files_to_skip.extend(to_remove)
+                
+            # Update results
+            results['duplicates_fixed'] += len(files_to_skip)
+            results['total_fixed'] += len(files_to_skip)
+            
+            # Log the duplicate decisions
+            for to_keep, to_remove in dup_decisions.items():
+                # Log the file we're keeping
+                new_row = pd.DataFrame({
+                    'original_path': [to_keep],
+                    'new_path': [os.path.join(output_dir, os.path.basename(to_keep))],
+                    'issue_type': ['duplicate'],
+                    'action_taken': ['kept (primary copy)']
+                })
+                log_df = pd.concat([log_df, new_row], ignore_index=True)
+                
+                # Log the duplicates we're removing
+                for dup in to_remove:
+                    new_row = pd.DataFrame({
+                        'original_path': [dup],
+                        'new_path': [''],
+                        'issue_type': ['duplicate'],
+                        'action_taken': ['excluded (duplicate)']
+                    })
+                    log_df = pd.concat([log_df, new_row], ignore_index=True)
+        
+        # Process all files (excluding duplicates that should be skipped)
+        for file_path in all_files:
+            # Skip files that have been marked for exclusion
+            if 'files_to_skip' in locals() and file_path in files_to_skip:
+                continue
+                
+            # Initialize variables
+            current_path = file_path
+            issues_fixed = []
+            
+            # 1. Fix path length issues
+            if path_shortener and 'path_length' in issues_data:
+                if file_path in issues_data['path_length']:
+                    shortened_path = path_shortener.shorten_path(current_path)
+                    if shortened_path != current_path:
+                        current_path = shortened_path
+                        issues_fixed.append('path_length')
+                        results['path_fixed'] += 1
+                        results['total_fixed'] += 1
+            
+            # 2. Fix name issues (illegal chars, reserved names, etc.)
+            if name_fixer:
+                name_issues = []
+                for issue_type in ['illegal_chars', 'reserved_names', 'illegal_prefix', 'illegal_suffix']:
+                    if issue_type in issues_data and file_path in issues_data[issue_type]:
+                        name_issues.append(issue_type)
+                
+                if name_issues:
+                    fixed_path = name_fixer.fix_name(current_path)
+                    if fixed_path != current_path:
+                        current_path = fixed_path
+                        issues_fixed.extend(name_issues)
+                        results['name_fixed'] += 1
+                        results['total_fixed'] += 1
+            
+            # 3. Fix permission issues
+            if permission_fixer and 'read_only' in issues_data:
+                if file_path in issues_data['read_only']:
+                    # Just note that we'll fix permissions when copying
+                    issues_fixed.append('permissions')
+                    results['permissions_fixed'] += 1
+                    results['total_fixed'] += 1
+            
+            # Determine the final destination path
+            rel_path = os.path.relpath(current_path, os.path.commonpath([current_path, file_path]))
+            dest_path = os.path.join(output_dir, rel_path)
+            
+            # Create directories if needed
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            
+            # Copy the file with fixed issues
+            try:
+                # If it's a duplicate and we're renaming all duplicates
+                if deduplicator and deduplicator.strategy == "Rename All Duplicates":
+                    for group_idx, group in enumerate(duplicate_groups):
+                        if file_path in group:
+                            file_idx = group.index(file_path)
+                            # Special handling for renamed duplicates
+                            success, new_path = deduplicator.fix_file(
+                                file_path, output_dir, True, file_idx
+                            )
+                            dest_path = new_path
+                            break
+                else:
+                    # Normal copy, fixing permissions if needed
+                    if 'permissions' in issues_fixed and permission_fixer:
+                        permission_fixer.fix_permissions(file_path)
+                    shutil.copy2(file_path, dest_path)
+                
+                # Log the action
+                new_row = pd.DataFrame({
+                    'original_path': [file_path],
+                    'new_path': [dest_path],
+                    'issue_type': [','.join(issues_fixed) if issues_fixed else 'none'],
+                    'action_taken': ['copied with fixes' if issues_fixed else 'copied']
+                })
+                log_df = pd.concat([log_df, new_row], ignore_index=True)
+                
+            except Exception as e:
+                print(f"Error copying file {file_path} to {dest_path}: {e}")
+                new_row = pd.DataFrame({
+                    'original_path': [file_path],
+                    'new_path': [''],
+                    'issue_type': [','.join(issues_fixed) if issues_fixed else 'none'],
+                    'action_taken': [f'error: {str(e)}']
+                })
+                log_df = pd.concat([log_df, new_row], ignore_index=True)
+            
+            # Update progress
+            processed += 1
+            progress = int((processed / total_files) * 100)
+            self.progress_updated.emit(progress)
+        
+        # Save the log file
+        log_df.to_csv(log_file, index=False)
+        
+        # Create a summary file
+        summary_file = os.path.join(log_dir, 'migration_summary.txt')
+        with open(summary_file, 'w') as f:
+            f.write(f"SharePoint Migration Tool - Fix Summary\n")
+            f.write(f"Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(f"Total files processed: {total_files}\n")
+            f.write(f"Path issues fixed: {results['path_fixed']}\n")
+            f.write(f"Name issues fixed: {results['name_fixed']}\n")
+            f.write(f"Duplicates resolved: {results['duplicates_fixed']}\n")
+            f.write(f"Permission issues fixed: {results['permissions_fixed']}\n")
+            f.write(f"Total issues fixed: {results['total_fixed']}\n\n")
+            f.write(f"Files copied to: {output_dir}\n")
+            f.write(f"Detailed log file: {log_file}\n")
+        
+        return results

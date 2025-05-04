@@ -1,349 +1,181 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Path shortener for SharePoint Data Migration Cleanup Tool.
-Shortens paths that exceed SharePoint's path length limitations.
-"""
-
+# core/fixers/path_shortener.py
 import os
-import logging
-import pandas as pd
-from pathlib import Path
-
-logger = logging.getLogger('sharepoint_migration_tool')
+import re
+import shutil
 
 class PathShortener:
-    """Shortens paths that exceed SharePoint's length limitations"""
+    """Shortens paths that exceed SharePoint's 256 character limit"""
     
-    def __init__(self, config=None):
+    def __init__(self, strategy="Abbreviate Directories"):
+        self.strategy = strategy
+        self.max_path_length = 256
+        
+    def shorten_path(self, file_path):
         """
-        Initialize the path shortener
+        Shorten a path that exceeds the maximum path length
         
         Args:
-            config (dict): Configuration settings
-        """
-        self.config = config or {}
-        
-        # Get SharePoint path limits from config
-        self.sharepoint_config = self.config.get('sharepoint', {})
-        self.max_path_length = self.sharepoint_config.get('max_path_length', 256)
-        
-        # Configure shortening strategies
-        self.strategies = [
-            self._strategy_abbreviate_dirs,
-            self._strategy_remove_middle_dirs,
-            self._strategy_truncate_names,
-            self._strategy_minimal_path
-        ]
-        
-    def shorten_path(self, original_path, target_root=None):
-        """
-        Shorten a path to comply with SharePoint's length limitation
-        
-        Args:
-            original_path (str): Original path to shorten
-            target_root (str, optional): Target root directory for the shortened path
+            file_path: The file path to shorten
             
         Returns:
-            str: Shortened path that complies with SharePoint's length limitation
+            str: The shortened path
         """
-        # If path is already short enough, return it as is
-        if len(original_path) <= self.max_path_length:
-            if target_root:
-                # Convert to target root
-                try:
-                    rel_path = os.path.relpath(original_path, os.path.dirname(os.path.dirname(original_path)))
-                    return os.path.join(target_root, rel_path)
-                except:
-                    # Fallback: just use the filename in the target root
-                    return os.path.join(target_root, os.path.basename(original_path))
-            else:
-                return original_path
-                
-        # Try each strategy in order until one works
-        for strategy in self.strategies:
-            shortened_path = strategy(original_path, target_root)
-            if len(shortened_path) <= self.max_path_length:
-                return shortened_path
-                
-        # If all strategies fail, return a minimal path
-        file_name = os.path.basename(original_path)
-        if target_root:
-            return os.path.join(target_root, file_name)
+        if len(file_path) <= self.max_path_length:
+            return file_path
+            
+        # Choose strategy based on the setting
+        if self.strategy == "Abbreviate Directories":
+            return self._abbreviate_directories(file_path)
+        elif self.strategy == "Remove Middle Directories":
+            return self._remove_middle_directories(file_path)
+        elif self.strategy == "Truncate Names":
+            return self._truncate_names(file_path)
+        elif self.strategy == "Minimal Path":
+            return self._minimal_path(file_path)
         else:
-            drive = os.path.splitdrive(original_path)[0]
-            return os.path.join(drive + os.sep if drive else "", file_name)
-            
-    def _strategy_abbreviate_dirs(self, original_path, target_root=None):
+            # Default to abbreviate directories
+            return self._abbreviate_directories(file_path)
+    
+    def _abbreviate_directories(self, file_path):
         """
-        Strategy 1: Abbreviate directory names while preserving structure
-        
-        Args:
-            original_path (str): Original path to shorten
-            target_root (str, optional): Target root directory
-            
-        Returns:
-            str: Shortened path with abbreviated directory names
+        Shorten path by abbreviating directory names
+        Example: "Development Documentation" → "Dev~Doc"
         """
-        path_obj = Path(original_path)
-        file_name = path_obj.name
+        dir_name, file_name = os.path.split(file_path)
+        dirs = dir_name.split(os.path.sep)
         
-        # Preserve the drive or root
-        drive = os.path.splitdrive(original_path)[0]
+        # Don't abbreviate the drive letter (if on Windows)
+        start_idx = 1 if os.name == 'nt' and ':' in dirs[0] else 0
         
-        # Get the directory parts (excluding drive and filename)
-        if drive:
-            # Windows-style path with drive letter
-            parts = list(path_obj.parts)[1:-1]  # Exclude drive and filename
-        else:
-            # Unix-style path
-            parts = list(path_obj.parts)[1:-1] if path_obj.parts[0] == '/' else list(path_obj.parts)[:-1]
-            
         # Abbreviate directory names
-        abbreviated_parts = []
-        for part in parts:
-            # Skip empty parts
-            if not part:
-                continue
-                
-            # Abbreviate long directory names (keep first 3 and last 3 characters)
-            if len(part) > 8:
-                abbreviated_parts.append(f"{part[:3]}~{part[-3:]}")
+        for i in range(start_idx, len(dirs)):
+            if len(dirs[i]) > 5:
+                words = re.findall(r'[A-Z][a-z]*|[a-z]+', dirs[i])
+                if len(words) > 1:
+                    # Use first 3 chars of first word and first char of rest
+                    abbr = words[0][:3] + ''.join(w[0] for w in words[1:])
+                    dirs[i] = abbr
+                else:
+                    # Just truncate to 5 chars with a tilde
+                    dirs[i] = dirs[i][:4] + '~'
+        
+        new_path = os.path.sep.join(dirs) + os.path.sep + file_name
+        
+        # If still too long, try another strategy
+        if len(new_path) > self.max_path_length:
+            return self._truncate_names(new_path)
+            
+        return new_path
+    
+    def _remove_middle_directories(self, file_path):
+        """
+        Shorten path by keeping first and last directories, replacing middle with "..."
+        Example: "/Dept/Team/Projects/2023/Q4/Reports/" → "/Dept/.../Reports/"
+        """
+        dir_name, file_name = os.path.split(file_path)
+        dirs = dir_name.split(os.path.sep)
+        
+        # Keep the root and at most 2 levels, then ellipsis, then last 2 levels
+        if len(dirs) > 5:
+            # On Windows, keep the drive letter
+            if os.name == 'nt' and ':' in dirs[0]:
+                shortened_dirs = [dirs[0], dirs[1], '...'] + dirs[-2:]
             else:
-                abbreviated_parts.append(part)
+                shortened_dirs = [dirs[0], '...'] + dirs[-2:]
                 
-        # Build the shortened path
-        if target_root:
-            # Use target root
-            result_path = os.path.join(target_root, *abbreviated_parts, file_name)
-        elif drive:
-            # Windows-style path with drive letter
-            result_path = os.path.join(drive + os.sep, *abbreviated_parts, file_name)
-        elif path_obj.is_absolute():
-            # Unix-style absolute path
-            result_path = os.path.join(os.sep, *abbreviated_parts, file_name)
-        else:
-            # Relative path
-            result_path = os.path.join(*abbreviated_parts, file_name)
+            dir_name = os.path.sep.join(shortened_dirs)
+            new_path = os.path.join(dir_name, file_name)
             
-        return result_path
-        
-    def _strategy_remove_middle_dirs(self, original_path, target_root=None):
+            # If still too long, try another strategy
+            if len(new_path) > self.max_path_length:
+                return self._truncate_names(new_path)
+                
+            return new_path
+        else:
+            # Not enough directories to shorten this way, try another strategy
+            return self._truncate_names(file_path)
+    
+    def _truncate_names(self, file_path):
         """
-        Strategy 2: Remove middle directories while preserving key parts
+        Shorten path by truncating all directory and file names
+        Example: "Quarterly Financial Analysis Report.xlsx" → "Quar Fin Analy Rep.xlsx"
+        """
+        dir_name, file_name = os.path.split(file_path)
+        file_base, file_ext = os.path.splitext(file_name)
+        
+        # Truncate the filename to 20 chars max plus extension
+        if len(file_base) > 20:
+            file_base = file_base[:17] + '...'
+        
+        # Split and truncate directory names
+        dirs = dir_name.split(os.path.sep)
+        for i in range(len(dirs)):
+            if len(dirs[i]) > 10:
+                dirs[i] = dirs[i][:8] + '..'
+        
+        shortened_dir = os.path.sep.join(dirs)
+        new_path = os.path.join(shortened_dir, file_base + file_ext)
+        
+        # If still too long, use the most aggressive strategy
+        if len(new_path) > self.max_path_length:
+            return self._minimal_path(file_path)
+            
+        return new_path
+    
+    def _minimal_path(self, file_path):
+        """
+        Create a minimal path by keeping only essential components
+        Example: "C:/Very/Long/Path/To/File.docx" → "C:/ShortPath/File.docx"
+        """
+        dir_name, file_name = os.path.split(file_path)
+        
+        # For Windows, keep the drive letter
+        if os.name == 'nt' and ':' in dir_name:
+            drive = dir_name.split(':')[0] + ':'
+            new_dir = drive + os.path.sep + 'ShortPath'
+        else:
+            new_dir = os.path.sep + 'ShortPath'
+        
+        # Ensure filename is not too long
+        file_base, file_ext = os.path.splitext(file_name)
+        if len(file_base) > 20:
+            file_base = file_base[:17] + '...'
+        
+        return os.path.join(new_dir, file_base + file_ext)
+    
+    def fix_file(self, src_path, dest_dir, preserve_structure=False):
+        """
+        Fix a file's path and copy it to the destination directory
         
         Args:
-            original_path (str): Original path to shorten
-            target_root (str, optional): Target root directory
+            src_path: Source file path
+            dest_dir: Destination directory
+            preserve_structure: Whether to preserve the directory structure
             
         Returns:
-            str: Shortened path with middle directories removed
+            Tuple: (success, new_path)
         """
-        path_obj = Path(original_path)
-        file_name = path_obj.name
-        
-        # Preserve the drive or root
-        drive = os.path.splitdrive(original_path)[0]
-        
-        # Get the directory parts (excluding drive and filename)
-        if drive:
-            # Windows-style path with drive letter
-            parts = list(path_obj.parts)[1:-1]  # Exclude drive and filename
-        else:
-            # Unix-style path
-            parts = list(path_obj.parts)[1:-1] if path_obj.parts[0] == '/' else list(path_obj.parts)[:-1]
+        try:
+            # Get the shortened path
+            shortened_path = self.shorten_path(src_path)
             
-        # Keep first and last directories, remove middle ones if there are more than 3 directories
-        if len(parts) > 3:
-            parts = [parts[0], "...", parts[-1]]
-            
-        # Build the shortened path
-        if target_root:
-            # Use target root
-            result_path = os.path.join(target_root, *parts, file_name)
-        elif drive:
-            # Windows-style path with drive letter
-            result_path = os.path.join(drive + os.sep, *parts, file_name)
-        elif path_obj.is_absolute():
-            # Unix-style absolute path
-            result_path = os.path.join(os.sep, *parts, file_name)
-        else:
-            # Relative path
-            result_path = os.path.join(*parts, file_name)
-            
-        return result_path
-        
-    def _strategy_truncate_names(self, original_path, target_root=None):
-        """
-        Strategy 3: Truncate all names to a maximum length
-        
-        Args:
-            original_path (str): Original path to shorten
-            target_root (str, optional): Target root directory
-            
-        Returns:
-            str: Shortened path with truncated names
-        """
-        path_obj = Path(original_path)
-        
-        # Split into name and extension
-        file_name = path_obj.name
-        name, ext = os.path.splitext(file_name)
-        
-        # Truncate the filename if it's very long
-        if len(name) > 30:
-            file_name = f"{name[:27]}...{ext}"
-            
-        # Preserve the drive or root
-        drive = os.path.splitdrive(original_path)[0]
-        
-        # Get the directory parts (excluding drive and filename)
-        if drive:
-            # Windows-style path with drive letter
-            parts = list(path_obj.parts)[1:-1]  # Exclude drive and filename
-        else:
-            # Unix-style path
-            parts = list(path_obj.parts)[1:-1] if path_obj.parts[0] == '/' else list(path_obj.parts)[:-1]
-            
-        # Truncate directory names (max 10 characters)
-        truncated_parts = []
-        for part in parts:
-            # Skip empty parts
-            if not part:
-                continue
-                
-            # Truncate long directory names
-            if len(part) > 10:
-                truncated_parts.append(f"{part[:7]}...")
+            # Determine the destination path
+            if preserve_structure:
+                # This doesn't make sense for path shortening since we're changing the structure
+                # Instead, recreate the shortened path structure
+                rel_path = os.path.relpath(shortened_path, os.path.dirname(shortened_path))
+                dest_path = os.path.join(dest_dir, rel_path)
             else:
-                truncated_parts.append(part)
-                
-        # Build the shortened path
-        if target_root:
-            # Use target root
-            result_path = os.path.join(target_root, *truncated_parts, file_name)
-        elif drive:
-            # Windows-style path with drive letter
-            result_path = os.path.join(drive + os.sep, *truncated_parts, file_name)
-        elif path_obj.is_absolute():
-            # Unix-style absolute path
-            result_path = os.path.join(os.sep, *truncated_parts, file_name)
-        else:
-            # Relative path
-            result_path = os.path.join(*truncated_parts, file_name)
+                # Just use the shortened filename in the destination directory
+                dest_path = os.path.join(dest_dir, os.path.basename(shortened_path))
             
-        return result_path
-        
-    def _strategy_minimal_path(self, original_path, target_root=None):
-        """
-        Strategy 4: Create a minimal path with just the necessary components
-        
-        Args:
-            original_path (str): Original path to shorten
-            target_root (str, optional): Target root directory
+            # Create subdirectories if they don't exist
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             
-        Returns:
-            str: Minimal path with just the filename
-        """
-        # Get just the filename
-        file_name = os.path.basename(original_path)
-        
-        # Preserve the drive or root
-        drive = os.path.splitdrive(original_path)[0]
-        
-        # Create a minimal path
-        if target_root:
-            # Use target root
-            result_path = os.path.join(target_root, "ShortPath", file_name)
-        elif drive:
-            # Windows-style path with drive letter
-            result_path = os.path.join(drive + os.sep, "ShortPath", file_name)
-        else:
-            # Unix-style path
-            result_path = os.path.join("ShortPath", file_name)
+            # Copy the file to the new location
+            shutil.copy2(src_path, dest_path)
             
-        return result_path
-        
-    def apply_fixes(self, issues_df, target_root=None):
-        """
-        Apply path shortening to a DataFrame of files with path issues
-        
-        Args:
-            issues_df (pandas.DataFrame): DataFrame with path issues to fix
-            target_root (str, optional): Target root directory for shortened paths
-            
-        Returns:
-            pandas.DataFrame: DataFrame with shortened file paths
-        """
-        if issues_df is None or len(issues_df) == 0:
-            logger.info("No path issues to fix")
-            return pd.DataFrame()
-            
-        # Create a copy to avoid modifying the original
-        result_df = issues_df.copy()
-        
-        # Add columns for the shortened path
-        if 'shortened_path' not in result_df.columns:
-            result_df['shortened_path'] = None
-            
-        # Apply fixes to each file
-        for index, row in result_df.iterrows():
-            original_path = row['path']
-            
-            # If a suggested path is already provided, use it
-            if 'suggested_path' in row and row['suggested_path']:
-                shortened_path = row['suggested_path']
-                
-                # If target_root is provided, adjust the path
-                if target_root:
-                    # Extract just the filename if we can't determine the relative path
-                    file_name = os.path.basename(shortened_path)
-                    shortened_path = os.path.join(target_root, file_name)
-            else:
-                # Otherwise, apply shortening strategy
-                shortened_path = self.shorten_path(original_path, target_root)
-                
-            result_df.at[index, 'shortened_path'] = shortened_path
-            
-        logger.info(f"Shortened {len(result_df)} file paths")
-        return result_df
-        
-    def preview_fixes(self, issues_df):
-        """
-        Generate a preview of path shortening without applying it
-        
-        Args:
-            issues_df (pandas.DataFrame): DataFrame with path issues to fix
-            
-        Returns:
-            pandas.DataFrame: DataFrame with original and shortened paths
-        """
-        # Create a preview DataFrame
-        preview_df = pd.DataFrame(columns=['original_path', 'original_length', 'shortened_path', 'shortened_length'])
-        
-        if issues_df is None or len(issues_df) == 0:
-            return preview_df
-            
-        # Generate preview for each file
-        for index, row in issues_df.iterrows():
-            original_path = row['path']
-            original_length = len(original_path)
-            
-            # Get shortened path
-            if 'suggested_path' in row and row['suggested_path']:
-                shortened_path = row['suggested_path']
-            else:
-                shortened_path = self.shorten_path(original_path)
-                
-            shortened_length = len(shortened_path)
-            
-            # Add to preview
-            preview_df = preview_df.append({
-                'original_path': original_path,
-                'original_length': original_length,
-                'shortened_path': shortened_path,
-                'shortened_length': shortened_length
-            }, ignore_index=True)
-            
-        return preview_df
+            return True, dest_path
+        except Exception as e:
+            print(f"Error fixing path for {src_path}: {e}")
+            return False, None

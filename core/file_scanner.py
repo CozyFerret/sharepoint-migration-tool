@@ -110,6 +110,19 @@ class FileSystemScanner:
         # Mapping to track unique files by hash
         self.file_hashes = {}
     
+    def scan(self, root_path=None, callbacks=None):
+        """
+        Alias for scan_directory, for compatibility with Scanner interface.
+        
+        Args:
+            root_path (str, optional): The root directory to scan. If None, uses previously set root path.
+            callbacks (dict, optional): Dictionary of callback functions.
+            
+        Returns:
+            dict: The scan results, including file and issue details
+        """
+        return self.scan_directory(root_path, callbacks)
+    
     def scan_directory(self, root_path, callbacks=None):
         """
         Scan a directory and its subdirectories for detailed file analysis.
