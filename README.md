@@ -1,114 +1,153 @@
 # SharePoint Data Migration Cleanup Tool
 
-A Python-based desktop application for cleaning and preparing file systems for SharePoint migration. This tool helps identify and fix common issues encountered during SharePoint migrations, such as illegal characters in file names, overly long paths, duplicate files, and potentially sensitive information.
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/CozyFerret/sharepoint-migration-tool/ci.yml?branch=main)
+![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/github/license/CozyFerret/sharepoint-migration-tool)
 
-## Key Features
+A Python-based desktop application for cleaning and preparing file systems for SharePoint migration. This tool helps identify and fix common issues encountered during SharePoint migrations, ensuring a smooth transition to SharePoint Online or on-premises environments.
 
-- **No Permanent Storage**: Runs in-memory only, with no data persistence to eliminate security concerns
-- **SharePoint Naming Compliance**: Detects and fixes illegal characters and reserved names
-- **Path Length Reduction**: Identifies paths exceeding SharePoint's 256 character limit and suggests fixes
-- **Duplicate File Detection**: Finds exact and similar duplicates using hash comparison
-- **PII Detection**: *(Coming Soon)* Placeholder for future functionality to identify files containing sensitive information
-- **Data Insights**: Visualizes file system structure and issues
-- **Customizable Reports**: Exports insights in various formats
-- **Dual Cleanup Modes**:
+## 🌟 Key Features
+
+- **Non-Destructive Operation**: All changes are made to copies of original files, preserving your source data
+- **In-Memory Processing**: No permanent data storage for enhanced security
+- **Comprehensive Analysis**:
+  - **SharePoint Naming Compliance**: Detects and fixes illegal characters and reserved names
+  - **Path Length Reduction**: Identifies paths exceeding SharePoint's 256 character limit and suggests fixes
+  - **Duplicate File Detection**: Finds exact and similar duplicates using hash comparison
+  - **PII Detection**: **PLACEHOLDER ONLY** - Framework exists but no actual detection functionality yet
+- **Flexible Cleanup Options**:
   - **Manual Mode**: Non-destructively copies cleaned data to a new folder
   - **Automatic Mode**: Cleans data and uploads directly to SharePoint
+- **Visual Analysis**: Dashboard with insights about your file structure and issues
+- **Export Capabilities**: Generate detailed reports in various formats (CSV, Excel, JSON, Text)
 
-## Installation
+## 📋 Requirements
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/sharepoint-migration-tool.git
+- Python 3.8+
+- Dependencies:
+  - PyQt5 (UI framework)
+  - pandas (data processing)
+  - pathlib (path manipulation)
+  - Office365-REST-Python-Client (SharePoint integration)
+  - See `requirements.txt` for full list
+
+## 🚀 Getting Started
+
+### Installation
+
+1. **Clone this repository**:
+   ```bash
+   git clone https://github.com/CozyFerret/sharepoint-migration-tool.git
    cd sharepoint-migration-tool
    ```
 
-2. Create a virtual environment and activate it:
-   ```
+2. **Create a virtual environment and activate it**:
+   ```bash
+   # Create environment
    python -m venv venv
    
-   # On Windows
+   # Activate on Windows
    venv\Scripts\activate
    
-   # On macOS/Linux
+   # Activate on macOS/Linux
    source venv/bin/activate
    ```
 
-3. Install dependencies:
-   ```
+3. **Install dependencies**:
+   ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
+### Usage
 
-Run the application:
-```
-python main.py
-```
+1. **Launch the application**:
+   ```bash
+   python main.py
+   ```
 
-### Basic Workflow
+2. **Basic workflow**:
+   - Select the folder you want to analyze using the "Browse" button
+   - Configure which features you want to use (Name Validation, Path Length, etc.)
+   - Click "Start Scan" to begin analysis
+   - View results in the Dashboard tab
+   - Explore detailed findings in the Analysis and Results tabs
+   - Export reports as needed from the Export tab
+   - Clean and prepare data using either:
+     - **Manual Mode**: Select a target folder for the cleaned files
+     - **Automatic Mode**: Connect to SharePoint and upload directly
 
-1. Select the folder you want to analyze using the "Browse" button
-2. Configure which features you want to use (Name Validation, Path Length, etc.)
-3. Click "Start Scan" to begin analysis
-4. View results in the Dashboard tab
-5. Explore detailed findings in the Analysis and Results tabs
-6. Export reports as needed from the Export tab
-7. Clean and prepare data using either:
-   - **Manual Mode**: Select a target folder for the cleaned files
-   - **Automatic Mode**: Connect to SharePoint and upload directly
+## 🔒 Security Features
 
-## Security Features
+- **No permanent storage**: All data processing happens in memory
+- **Secure memory management**: Memory is wiped after sensitive operations
+- **PII awareness**: Framework exists but actual PII detection is a placeholder for future development
+- **Secure clipboard handling**: Clipboard is cleared after copy operations
 
-- No permanent data storage
-- Memory is securely cleared after use
-- PII detection without extraction
-- Clipboard clearing after sensitive operations
-
-## Requirements
-
-- Python 3.8+
-- PyQt5
-- pandas
-- pathlib
-- python-magic
-- spacy (for PII detection)
-- matplotlib/seaborn (for visualizations)
-- jinja2 (for report templates)
-- weasyprint (for PDF export)
-- openpyxl (for Excel export)
-- Office365-REST-Python-Client (for SharePoint integration)
-- msal (for Microsoft authentication)
-- requests (for API calls)
-
-## Development
-
-### Project Structure
+## 🏗️ Project Structure
 
 ```
 sharepoint_migration_tool/
-├── core/               # Core functionality
-│   ├── scanner.py      # File system scanning
-│   ├── analyzers/      # Analysis modules
-│   └── fixers/         # Issue correction modules
-├── ui/                 # User interface
-├── utils/              # Utility functions
-├── resources/          # UI resources
-├── reports/            # Report templates
-├── main.py             # Application entry point
-└── README.md           # This file
+├── core/                   # Core functionality
+│   ├── scanner.py          # File system scanning
+│   ├── data_cleaner.py     # Cleaning operations
+│   ├── data_processor.py   # Process orchestration
+│   ├── analyzers/          # Analysis modules
+│   │   ├── name_validator.py
+│   │   ├── path_analyzer.py
+│   │   ├── duplicate_finder.py
+│   │   └── pii_detector.py # PLACEHOLDER - No actual detection yet
+│   └── fixers/             # Issue correction modules
+│       ├── path_shortener.py
+│       ├── name_fixer.py
+│       └── deduplicator.py
+├── infrastructure/
+│   └── sharepoint.py       # SharePoint connectivity
+├── ui/                     # User interface components
+├── utils/                  # Utility functions
+├── main.py                 # Application entry point
+└── README.md               # This file
 ```
 
-### Adding New Features
+## ✅ Current Status
 
-1. For new analyzers, add a module in `core/analyzers/`
-2. For new fixers, add a module in `core/fixers/`
-3. Update the UI components in `ui/` to expose the new functionality
+- ✅ SharePoint naming compliance validation and fixing
+- ✅ Path length detection and shortening
+- ✅ Duplicate file detection and management
+- ✅ Manual cleaning mode (copy to new location)
+- ✅ Automatic SharePoint upload mode
+- ✅ Data export functionality
+- ❌ PII Detection (placeholder only - framework exists but no actual detection yet)
 
-## License
+## 🧩 Extending the Tool
 
-[MIT License](LICENSE)
+The modular design makes it easy to extend the functionality:
 
-## Disclaimer
+- For new analyzers, add a module in `core/analyzers/`
+- For new fixers, add a module in `core/fixers/`
+- Update the UI components in `ui/` to expose the new functionality
+
+## 🔮 Future Development Plans
+
+- Implement actual PII detection functionality using NLP techniques
+- Add automated testing with large datasets
+- Enhance SharePoint connectivity with additional authentication methods
+- Add visualization components for file system structure
+- Implement more sophisticated path shortening algorithms
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## ⚠️ Disclaimer
 
 This tool is provided as-is without warranty. Always test thoroughly before using in production environments.
