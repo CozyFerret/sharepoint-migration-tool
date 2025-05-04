@@ -7,7 +7,7 @@ Contains the main functionality for scanning, analyzing, and cleaning files.
 """
 
 # Import main components for easy access
-from core.scanner import FileSystemScanner
+from core.scanner import Scanner as FileSystemScanner
 from core.data_cleaner import DataCleaner
 from core.data_processor import DataProcessor
 

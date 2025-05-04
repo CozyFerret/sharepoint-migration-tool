@@ -1,252 +1,136 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# core/scanner.py
 
-"""
-File system scanner for SharePoint Data Migration Cleanup Tool.
-Recursively scans directories and collects file metadata.
-"""
-
+from PyQt5.QtCore import QThread, pyqtSignal
 import os
-import hashlib
-import time
-import logging
-import pathlib
-from datetime import datetime
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
-import pandas as pd
 
-logger = logging.getLogger('sharepoint_migration_tool')
-
-class ScannerWorker(QObject):
-    """Worker thread for scanning the file system"""
-    
+class Scanner(QThread):
+    """
+    Thread for scanning file system and detecting potential SharePoint migration issues.
+    """
     # Define signals
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    error = pyqtSignal(str)
-    finished = pyqtSignal(object)
+    progress_updated = pyqtSignal(int, int)  # current, total
+    scan_completed = pyqtSignal(dict)        # results
+    error_occurred = pyqtSignal(str)         # error message
     
-    def __init__(self, root_path, scan_options):
-        """
-        Initialize the scanner worker
-        
-        Args:
-            root_path (str): The root path to scan
-            scan_options (dict): Options controlling the scan behavior
-        """
+    def __init__(self, source_folder):
         super().__init__()
-        self.root_path = root_path
-        self.scan_options = scan_options
-        self.should_stop = False
+        self.source_folder = source_folder
         
-    def stop(self):
-        """Signal the worker to stop scanning"""
-        self.should_stop = True
-        
-    def calculate_file_hash(self, file_path):
-        """
-        Calculate SHA-256 hash of a file
-        
-        Args:
-            file_path (str): Path to the file
-            
-        Returns:
-            str: The hexadecimal hash of the file
-        """
-        if not self.scan_options.get('calculate_hashes', False):
-            return ""
-            
+    def run(self):
+        """Main scanning method that runs in a separate thread"""
         try:
-            hasher = hashlib.sha256()
-            with open(file_path, 'rb') as f:
-                # Read the file in chunks to avoid loading large files into memory
-                for chunk in iter(lambda: f.read(4096), b""):
-                    hasher.update(chunk)
-            return hasher.hexdigest()
-        except Exception as e:
-            logger.warning(f"Error calculating hash for {file_path}: {e}")
-            return ""
-        
-    def scan(self):
-        """
-        Scan the file system starting from the root path
-        
-        Emits:
-            progress: Percentage completion
-            status: Current status message
-            error: Error message if any
-            finished: The scan results as a pandas DataFrame
-        """
-        try:
-            start_time = time.time()
-            self.status.emit(f"Starting scan at {self.root_path}")
-            
-            # Check if the root path exists
-            if not os.path.exists(self.root_path):
-                self.error.emit(f"Path does not exist: {self.root_path}")
-                return
-                
-            # Count total number of files for progress reporting
-            total_files = 0
-            if self.scan_options.get('calculate_total_files', True):
-                self.status.emit("Counting files...")
-                for _, _, files in os.walk(self.root_path):
-                    total_files += len(files)
-                    # Check if we should stop
-                    if self.should_stop:
-                        self.status.emit("Scan cancelled")
-                        return
-                self.status.emit(f"Found {total_files} files to scan")
-            
-            # Initialize results list
-            results = []
-            processed_files = 0
-            
-            # Traverse the file system
-            self.status.emit(f"Scanning files...")
-            for root, dirs, files in os.walk(self.root_path):
-                # Check if we should stop
-                if self.should_stop:
-                    self.status.emit("Scan cancelled")
-                    break
-                    
-                # Process each file
-                for file in files:
-                    # Check if we should stop
-                    if self.should_stop:
-                        break
-                        
-                    full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(full_path, self.root_path)
-                    
-                    try:
-                        # Get file stats
-                        stats = os.stat(full_path)
-                        file_size = stats.st_size
-                        created_time = datetime.fromtimestamp(stats.st_ctime)
-                        modified_time = datetime.fromtimestamp(stats.st_mtime)
-                        
-                        # Get extension
-                        _, extension = os.path.splitext(file)
-                        extension = extension.lower()
-                        
-                        # Calculate hash if needed
-                        file_hash = ""
-                        if self.scan_options.get('calculate_hashes', False):
-                            file_hash = self.calculate_file_hash(full_path)
-                        
-                        # Add file to results
-                        results.append({
-                            'path': full_path,
-                            'relative_path': relative_path,
-                            'parent_folder': os.path.basename(root),
-                            'name': file,
-                            'extension': extension,
-                            'size': file_size,
-                            'created': created_time,
-                            'modified': modified_time,
-                            'path_length': len(full_path),
-                            'hash': file_hash
-                        })
-                        
-                        # Update progress
-                        processed_files += 1
-                        if total_files > 0:
-                            progress_percent = int((processed_files / total_files) * 100)
-                            self.progress.emit(progress_percent)
-                        
-                        # Status update every 100 files
-                        if processed_files % 100 == 0:
-                            self.status.emit(f"Processed {processed_files} files...")
-                            
-                    except Exception as e:
-                        logger.warning(f"Error processing file {full_path}: {e}")
-            
-            # Convert results to DataFrame
-            df = pd.DataFrame(results)
-            
-            # Scan completion
-            end_time = time.time()
-            scan_time = end_time - start_time
-            self.status.emit(f"Scan complete. Processed {len(df)} files in {scan_time:.2f} seconds")
-            
-            # Emit the results
-            self.finished.emit(df)
-            
-        except Exception as e:
-            logger.error(f"Error during file scan: {e}")
-            self.error.emit(f"Scan error: {str(e)}")
-
-class FileSystemScanner:
-    """Main scanner class that manages scanning operations"""
-    
-    def __init__(self):
-        """Initialize the scanner"""
-        self.worker = None
-        self.thread = None
-        self.results = None
-        
-    def start_scan(self, root_path, scan_options=None, progress_callback=None, 
-                   status_callback=None, error_callback=None, finished_callback=None):
-        """
-        Start scanning a directory
-        
-        Args:
-            root_path (str): The root path to scan
-            scan_options (dict): Options controlling scan behavior
-            progress_callback (function): Callback for progress updates
-            status_callback (function): Callback for status messages
-            error_callback (function): Callback for error messages
-            finished_callback (function): Callback for scan completion
-        """
-        # Default scan options
-        if scan_options is None:
-            scan_options = {
-                'calculate_hashes': True,
-                'calculate_total_files': True
+            # Initialize results structure
+            results = {
+                'root_directory': self.source_folder,
+                'total_files': 0,
+                'total_folders': 0,
+                'total_size': 0,
+                'total_issues': 0,
+                'file_structure': {},
+                'path_length_issues': {},
+                'illegal_characters': {},
+                'reserved_names': {},
+                'duplicates': {}
             }
             
-        # Create worker thread
-        self.thread = QThread()
-        self.worker = ScannerWorker(root_path, scan_options)
-        self.worker.moveToThread(self.thread)
-        
-        # Connect signals
-        self.thread.started.connect(self.worker.scan)
-        
-        if progress_callback:
-            self.worker.progress.connect(progress_callback)
+            # Scan directory recursively
+            self._scan_directory(self.source_folder, results)
             
-        if status_callback:
-            self.worker.status.connect(status_callback)
+            # Analyze results
+            self._analyze_results(results)
             
-        if error_callback:
-            self.worker.error.connect(error_callback)
+            # Emit completion signal with results
+            self.scan_completed.emit(results)
             
-        # Connect the finished signal
-        def on_finished(results):
-            self.results = results
-            self.thread.quit()
-            if finished_callback:
-                finished_callback(results)
+        except Exception as e:
+            # Emit error signal
+            self.error_occurred.emit(str(e))
+    
+    def _scan_directory(self, directory, results):
+        """Recursively scan a directory and collect file/folder information"""
+        try:
+            # Keep track of files in this directory
+            results['file_structure'][directory] = {
+                'files': [],
+                'folders': []
+            }
+            
+            # Count files and folders
+            file_count = 0
+            for root, dirs, files in os.walk(directory):
+                # Process folders
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    results['total_folders'] += 1
+                    
+                    # Add to file structure
+                    parent_dir = os.path.dirname(dir_path)
+                    if parent_dir in results['file_structure']:
+                        folder_info = {
+                            'path': dir_path,
+                            'name': dir_name
+                        }
+                        results['file_structure'][parent_dir]['folders'].append(folder_info)
                 
-        self.worker.finished.connect(on_finished)
-        
-        # Start the thread
-        logger.info(f"Starting scan of {root_path}")
-        self.thread.start()
-        
-    def stop_scan(self):
-        """Stop an ongoing scan"""
-        if self.worker and self.thread and self.thread.isRunning():
-            logger.info("Stopping scan")
-            self.worker.stop()
+                # Process files
+                for file_name in files:
+                    file_path = os.path.join(root, file_name)
+                    file_size = os.path.getsize(file_path)
+                    
+                    # Update totals
+                    results['total_files'] += 1
+                    results['total_size'] += file_size
+                    
+                    # Add to file structure
+                    parent_dir = os.path.dirname(file_path)
+                    if parent_dir in results['file_structure']:
+                        file_info = {
+                            'path': file_path,
+                            'name': file_name,
+                            'size': file_size,
+                            'extension': os.path.splitext(file_name)[1],
+                            'issues': []
+                        }
+                        results['file_structure'][parent_dir]['files'].append(file_info)
+                    
+                    # Update progress
+                    file_count += 1
+                    if file_count % 10 == 0:  # Update every 10 files
+                        self.progress_updated.emit(file_count, 1000)  # Estimate 1000 files
+                
+                # Check for interruption
+                if self.isInterruptionRequested():
+                    return
             
-    def get_results(self):
-        """
-        Get the scan results
+            # Final progress update
+            self.progress_updated.emit(file_count, file_count)
+            
+        except Exception as e:
+            self.error_occurred.emit(f"Error scanning directory {directory}: {str(e)}")
+    
+    def _analyze_results(self, results):
+        """Analyze scan results to detect potential issues"""
+        # This would call various analyzers to detect issues
+        from core.analyzers.name_validator import SharePointNameValidator
+        from core.analyzers.path_analyzer import PathAnalyzer
+        from core.analyzers.duplicate_finder import DuplicateFinder
         
-        Returns:
-            pandas.DataFrame: The scan results
-        """
-        return self.results
+        # Initialize analyzers
+        name_validator = SharePointNameValidator()
+        path_analyzer = PathAnalyzer()
+        duplicate_finder = DuplicateFinder()
+        
+        # Apply analyzers to collected files
+        # This would analyze all files and populate the issues in the results
+        
+        # Example (simplified):
+        issue_count = 0
+        
+        # TODO: Implement actual analysis using your analyzers
+        # For now, just add some mock issues for demonstration
+        
+        results['total_issues'] = issue_count
+
+
+# Create alias for compatibility with existing code
+FileSystemScanner = Scanner

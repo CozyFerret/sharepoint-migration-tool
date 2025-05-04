@@ -1,593 +1,1240 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Export widget for SharePoint Data Migration Cleanup Tool.
-Handles exporting analysis results to various formats.
-"""
-
-import os
-import logging
-import json
-import pandas as pd
-import csv
-import shutil
-import subprocess
-from pathlib import Path
-from datetime import datetime
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QPushButton, QComboBox, QFileDialog, QGroupBox,
-                           QCheckBox, QGridLayout, QMessageBox, QTextEdit)
-from PyQt5.QtCore import Qt
-
-logger = logging.getLogger('sharepoint_migration_tool')
+                           QFrame, QGridLayout, QGroupBox, QPushButton,
+                           QRadioButton, QCheckBox, QButtonGroup, 
+                           QFileDialog, QComboBox, QSpinBox,
+                           QLineEdit, QTabWidget, QTextEdit, QScrollArea)
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QFont, QIcon
 
 class ExportWidget(QWidget):
-    """Widget for exporting analysis results"""
+    """
+    Widget for exporting scan results in various formats.
+    Provides configuration options for exports and preview functionality.
+    """
+    
+    # Define signals
+    export_requested = pyqtSignal(dict)  # Signal for export request with options
     
     def __init__(self):
-        """Initialize the export widget"""
         super().__init__()
-        
-        self.analysis_results = None
-        
-        # Set up the UI
         self.init_ui()
+        self.scan_results = None
         
     def init_ui(self):
-        """Set up the user interface"""
-        # Main layout
-        main_layout = QVBoxLayout(self)
+        """Initialize the export widget UI components"""
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Export format selection
-        format_group = QGroupBox("Export Format")
-        format_layout = QHBoxLayout()
+        # Create tabs for different export options
+        self.tabs = QTabWidget()
         
-        format_layout.addWidget(QLabel("Format:"))
+        # Create tabs for each export format
+        self.report_tab = QWidget()
+        self.data_tab = QWidget()
+        self.summary_tab = QWidget()
+        self.custom_tab = QWidget()
         
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["CSV", "Excel", "JSON", "Text Summary"])
-        format_layout.addWidget(self.format_combo)
+        # Setup tab contents
+        self.setup_report_tab()
+        self.setup_data_tab()
+        self.setup_summary_tab()
+        self.setup_custom_tab()
         
-        format_group.setLayout(format_layout)
-        main_layout.addWidget(format_group)
+        # Add tabs to tab widget
+        self.tabs.addTab(self.report_tab, "Report Export")
+        self.tabs.addTab(self.data_tab, "Data Export")
+        self.tabs.addTab(self.summary_tab, "Summary Export")
+        self.tabs.addTab(self.custom_tab, "Custom Export")
         
-        # Export content selection
-        content_group = QGroupBox("Export Content")
-        content_layout = QGridLayout()
+        # Add tabs to main layout
+        self.main_layout.addWidget(self.tabs)
         
-        self.export_all_check = QCheckBox("All Analysis Results")
-        self.export_all_check.setChecked(True)
-        self.export_all_check.stateChanged.connect(self._toggle_all_options)
-        content_layout.addWidget(self.export_all_check, 0, 0, 1, 2)
+        # Create preview panel
+        self.preview_group = QGroupBox("Export Preview")
+        preview_layout = QVBoxLayout(self.preview_group)
         
-        self.export_name_check = QCheckBox("Name Issues")
-        self.export_name_check.setChecked(True)
-        self.export_name_check.setEnabled(False)  # Initially disabled because "All" is checked
-        content_layout.addWidget(self.export_name_check, 1, 0)
-        
-        self.export_path_check = QCheckBox("Path Issues")
-        self.export_path_check.setChecked(True)
-        self.export_path_check.setEnabled(False)  # Initially disabled because "All" is checked
-        content_layout.addWidget(self.export_path_check, 1, 1)
-        
-        self.export_duplicate_check = QCheckBox("Duplicates")
-        self.export_duplicate_check.setChecked(True)
-        self.export_duplicate_check.setEnabled(False)  # Initially disabled because "All" is checked
-        content_layout.addWidget(self.export_duplicate_check, 2, 0)
-        
-        self.export_pii_check = QCheckBox("PII (Placeholder)")
-        self.export_pii_check.setChecked(True)
-        self.export_pii_check.setEnabled(False)  # Initially disabled because "All" is checked
-        content_layout.addWidget(self.export_pii_check, 2, 1)
-        
-        self.export_summary_check = QCheckBox("Summary Statistics")
-        self.export_summary_check.setChecked(True)
-        content_layout.addWidget(self.export_summary_check, 3, 0)
-        
-        content_group.setLayout(content_layout)
-        main_layout.addWidget(content_group)
-        
-        # Export action
-        export_button_layout = QHBoxLayout()
-        
-        self.export_button = QPushButton("Export...")
-        self.export_button.clicked.connect(self.export_data)
-        self.export_button.setEnabled(False)  # Initially disabled until we have data
-        export_button_layout.addWidget(self.export_button)
-        
-        main_layout.addLayout(export_button_layout)
-        
-        # Preview area
-        preview_group = QGroupBox("Export Preview")
-        preview_layout = QVBoxLayout()
-        
+        # Add preview text box
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setPlaceholderText("Export preview will appear here")
         preview_layout.addWidget(self.preview_text)
         
-        preview_group.setLayout(preview_layout)
-        main_layout.addWidget(preview_group)
+        # Add actions row
+        actions_layout = QHBoxLayout()
         
-        # Status area
-        self.status_label = QLabel("No data available for export")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.status_label)
+        self.generate_preview_button = QPushButton("Generate Preview")
+        self.generate_preview_button.clicked.connect(self.generate_preview)
         
-    def set_data(self, analysis_results):
-        """
-        Set the analysis results data for export
+        self.export_button = QPushButton("Export Now")
+        self.export_button.clicked.connect(self.perform_export)
+        self.export_button.setEnabled(False)
         
-        Args:
-            analysis_results (dict): Dictionary of analysis results
-        """
-        self.analysis_results = analysis_results
+        actions_layout.addWidget(self.generate_preview_button)
+        actions_layout.addStretch()
+        actions_layout.addWidget(self.export_button)
         
-        if not analysis_results:
-            self.status_label.setText("No data available for export")
-            self.export_button.setEnabled(False)
-            self.preview_text.clear()
-            return
-            
-        # Enable export button
-        self.export_button.setEnabled(True)
+        preview_layout.addLayout(actions_layout)
         
-        # Update status
-        total_issues = 0
-        if 'name_issues' in analysis_results:
-            total_issues += len(analysis_results['name_issues'])
-        if 'path_issues' in analysis_results:
-            total_issues += len(analysis_results['path_issues'])
-        if 'duplicates' in analysis_results:
-            total_issues += len(analysis_results['duplicates'])
-        if 'pii' in analysis_results:
-            total_issues += len(analysis_results['pii'])
-            
-        self.status_label.setText(f"Ready to export {total_issues} issues")
+        # Add preview group to main layout
+        self.main_layout.addWidget(self.preview_group)
         
-        # Generate preview
-        self._update_preview()
+    def setup_report_tab(self):
+        """Setup the comprehensive report export tab"""
+        layout = QVBoxLayout(self.report_tab)
         
-    def _toggle_all_options(self, state):
-        """
-        Toggle all export options based on the "All" checkbox
+        # Create description
+        description = QLabel("Generate a comprehensive report of all scan results and issues")
+        description.setWordWrap(True)
+        layout.addWidget(description)
         
-        Args:
-            state (int): Check state
-        """
-        enabled = not bool(state)  # True if "All" is unchecked
+        # Create format options
+        format_group = QGroupBox("Report Format")
+        format_layout = QVBoxLayout(format_group)
         
-        self.export_name_check.setEnabled(enabled)
-        self.export_path_check.setEnabled(enabled)
-        self.export_duplicate_check.setEnabled(enabled)
-        self.export_pii_check.setEnabled(enabled)
+        self.pdf_radio = QRadioButton("PDF Document")
+        self.html_radio = QRadioButton("HTML Document")
+        self.doc_radio = QRadioButton("Word Document")
+        self.text_radio = QRadioButton("Text Document")
         
-        # Update preview
-        self._update_preview()
+        self.pdf_radio.setChecked(True)
         
-    def _update_preview(self):
-        """Update the export preview"""
-        if not self.analysis_results:
-            self.preview_text.clear()
-            return
-            
-        # Get selected format
-        export_format = self.format_combo.currentText()
+        format_layout.addWidget(self.pdf_radio)
+        format_layout.addWidget(self.html_radio)
+        format_layout.addWidget(self.doc_radio)
+        format_layout.addWidget(self.text_radio)
         
-        # Generate preview based on format
-        if export_format == "Text Summary":
-            preview = self._generate_text_summary()
-        elif export_format == "JSON":
-            preview = self._generate_json_preview()
-        elif export_format == "CSV":
-            preview = "CSV export preview (headers only):\n\n"
-            preview += self._generate_csv_headers()
-        elif export_format == "Excel":
-            preview = "Excel export will contain the following sheets:\n\n"
-            if self.export_all_check.isChecked() or self.export_name_check.isChecked():
-                preview += "- Name Issues\n"
-            if self.export_all_check.isChecked() or self.export_path_check.isChecked():
-                preview += "- Path Issues\n"
-            if self.export_all_check.isChecked() or self.export_duplicate_check.isChecked():
-                preview += "- Duplicates\n"
-            if self.export_all_check.isChecked() or self.export_pii_check.isChecked():
-                preview += "- PII Issues (Placeholder)\n"
-            if self.export_summary_check.isChecked():
-                preview += "- Summary Statistics\n"
-                
-        self.preview_text.setText(preview)
+        # Group radio buttons
+        self.report_format_group = QButtonGroup(self)
+        self.report_format_group.addButton(self.pdf_radio)
+        self.report_format_group.addButton(self.html_radio)
+        self.report_format_group.addButton(self.doc_radio)
+        self.report_format_group.addButton(self.text_radio)
         
-    def _generate_text_summary(self):
-        """
-        Generate a text summary of the analysis results
+        layout.addWidget(format_group)
         
-        Returns:
-            str: Text summary
-        """
-        summary = "SharePoint Data Migration Analysis Summary\n"
-        summary += "=" * 40 + "\n\n"
-        summary += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        # Create content options
+        content_group = QGroupBox("Report Content")
+        content_layout = QVBoxLayout(content_group)
         
-        # Add summary statistics
-        total_issues = 0
-        name_issues = 0
-        path_issues = 0
-        duplicate_issues = 0
-        pii_issues = 0
+        self.include_summary_check = QCheckBox("Include Summary Statistics")
+        self.include_summary_check.setChecked(True)
         
-        if 'name_issues' in self.analysis_results:
-            name_issues = len(self.analysis_results['name_issues'])
-            total_issues += name_issues
-            
-        if 'path_issues' in self.analysis_results:
-            path_issues = len(self.analysis_results['path_issues'])
-            total_issues += path_issues
-            
-        if 'duplicates' in self.analysis_results:
-            # Only count non-original files as issues
-            if 'is_original' in self.analysis_results['duplicates'].columns:
-                duplicate_issues = (~self.analysis_results['duplicates']['is_original']).sum()
-            else:
-                duplicate_issues = len(self.analysis_results['duplicates'])
-            total_issues += duplicate_issues
-            
-        if 'pii' in self.analysis_results:
-            pii_issues = len(self.analysis_results['pii'])
-            total_issues += pii_issues
-            
-        summary += f"Total Issues Found: {total_issues}\n"
-        summary += f"- Name Issues: {name_issues}\n"
-        summary += f"- Path Length Issues: {path_issues}\n"
-        summary += f"- Duplicate Files: {duplicate_issues}\n"
-        summary += f"- Potential PII (Placeholder): {pii_issues}\n\n"
+        self.include_issues_check = QCheckBox("Include Detailed Issue Lists")
+        self.include_issues_check.setChecked(True)
         
-        # Add top issues by type
-        if self.export_all_check.isChecked() or self.export_name_check.isChecked():
-            if 'name_issues' in self.analysis_results and len(self.analysis_results['name_issues']) > 0:
-                summary += "Top Name Issues:\n"
-                summary += "-" * 15 + "\n"
-                for i, (_, row) in enumerate(self.analysis_results['name_issues'].head(5).iterrows()):
-                    summary += f"{i+1}. {row['name']} - {row['name_issues']}\n"
-                summary += "\n"
-                
-        if self.export_all_check.isChecked() or self.export_path_check.isChecked():
-            if 'path_issues' in self.analysis_results and len(self.analysis_results['path_issues']) > 0:
-                summary += "Top Path Length Issues:\n"
-                summary += "-" * 20 + "\n"
-                for i, (_, row) in enumerate(self.analysis_results['path_issues'].head(5).iterrows()):
-                    summary += f"{i+1}. Length: {row['path_length']} - {row['path']}\n"
-                summary += "\n"
-                
-        if self.export_all_check.isChecked() or self.export_duplicate_check.isChecked():
-            if 'duplicates' in self.analysis_results and len(self.analysis_results['duplicates']) > 0:
-                summary += "Top Duplicates:\n"
-                summary += "-" * 15 + "\n"
-                # Filter to show only non-original files
-                if 'is_original' in self.analysis_results['duplicates'].columns:
-                    dupes = self.analysis_results['duplicates'][~self.analysis_results['duplicates']['is_original']]
-                else:
-                    dupes = self.analysis_results['duplicates']
-                    
-                for i, (_, row) in enumerate(dupes.head(5).iterrows()):
-                    if 'original_path' in row and row['original_path']:
-                        summary += f"{i+1}. {row['path']} - Duplicate of {row['original_path']}\n"
-                    else:
-                        summary += f"{i+1}. {row['path']} - Possible duplicate\n"
-                summary += "\n"
-                
-        if self.export_all_check.isChecked() or self.export_pii_check.isChecked():
-            if 'pii' in self.analysis_results and len(self.analysis_results['pii']) > 0:
-                summary += "Potential PII (Placeholder Functionality):\n"
-                summary += "-" * 35 + "\n"
-                for i, (_, row) in enumerate(self.analysis_results['pii'].head(5).iterrows()):
-                    if 'pii_types' in row and row['pii_types']:
-                        summary += f"{i+1}. {row['path']} - {row['pii_types']}\n"
-                    else:
-                        summary += f"{i+1}. {row['path']} - Potential PII detected\n"
-                summary += "\n"
-                
-        # Add a note about PII detection being a placeholder
-        summary += "\nNote: PII detection is a placeholder in this version and will be fully implemented in future updates.\n"
+        self.include_charts_check = QCheckBox("Include Charts and Visualizations")
+        self.include_charts_check.setChecked(True)
         
-        return summary
+        self.include_recommendations_check = QCheckBox("Include Recommendations")
+        self.include_recommendations_check.setChecked(True)
         
-    def _generate_json_preview(self):
-        """
-        Generate a JSON preview of the analysis results
+        content_layout.addWidget(self.include_summary_check)
+        content_layout.addWidget(self.include_issues_check)
+        content_layout.addWidget(self.include_charts_check)
+        content_layout.addWidget(self.include_recommendations_check)
         
-        Returns:
-            str: JSON preview
-        """
-        # Create a simplified version of the data for preview
-        preview_data = {
-            "summary": {
-                "generated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "name_issues_count": len(self.analysis_results.get('name_issues', pd.DataFrame())),
-                "path_issues_count": len(self.analysis_results.get('path_issues', pd.DataFrame())),
-                "duplicates_count": len(self.analysis_results.get('duplicates', pd.DataFrame())),
-                "pii_issues_count": len(self.analysis_results.get('pii', pd.DataFrame())),
-            }
-        }
+        layout.addWidget(content_group)
         
-        # Add sample issues
-        if self.export_all_check.isChecked() or self.export_name_check.isChecked():
-            if 'name_issues' in self.analysis_results and len(self.analysis_results['name_issues']) > 0:
-                preview_data["name_issues_sample"] = self.analysis_results['name_issues'].head(2).to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_path_check.isChecked():
-            if 'path_issues' in self.analysis_results and len(self.analysis_results['path_issues']) > 0:
-                preview_data["path_issues_sample"] = self.analysis_results['path_issues'].head(2).to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_duplicate_check.isChecked():
-            if 'duplicates' in self.analysis_results and len(self.analysis_results['duplicates']) > 0:
-                preview_data["duplicates_sample"] = self.analysis_results['duplicates'].head(2).to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_pii_check.isChecked():
-            if 'pii' in self.analysis_results and len(self.analysis_results['pii']) > 0:
-                preview_data["pii_sample"] = self.analysis_results['pii'].head(2).to_dict('records')
-                
-        # Convert to JSON for preview
-        try:
-            return json.dumps(preview_data, indent=2, default=str)
-        except Exception as exc:
-            logger.error(f"Error generating JSON preview: {exc}")
-            return "Error generating JSON preview"
+        # Add destination selector
+        dest_group = QGroupBox("Destination")
+        dest_layout = QHBoxLayout(dest_group)
         
-    def _generate_csv_headers(self):
-        """
-        Generate CSV headers for the analysis results
+        self.report_path_label = QLabel("Not selected")
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self.browse_report_destination)
         
-        Returns:
-            str: CSV headers
-        """
-        headers = ""
+        dest_layout.addWidget(QLabel("Save to:"))
+        dest_layout.addWidget(self.report_path_label, 1)
+        dest_layout.addWidget(browse_button)
         
-        if self.export_all_check.isChecked() or self.export_name_check.isChecked():
-            if 'name_issues' in self.analysis_results:
-                headers += "Name Issues CSV:\n"
-                headers += ",".join(self.analysis_results['name_issues'].columns) + "\n\n"
-                
-        if self.export_all_check.isChecked() or self.export_path_check.isChecked():
-            if 'path_issues' in self.analysis_results:
-                headers += "Path Issues CSV:\n"
-                headers += ",".join(self.analysis_results['path_issues'].columns) + "\n\n"
-                
-        if self.export_all_check.isChecked() or self.export_duplicate_check.isChecked():
-            if 'duplicates' in self.analysis_results:
-                headers += "Duplicates CSV:\n"
-                headers += ",".join(self.analysis_results['duplicates'].columns) + "\n\n"
-                
-        if self.export_all_check.isChecked() or self.export_pii_check.isChecked():
-            if 'pii' in self.analysis_results:
-                headers += "PII CSV (Placeholder):\n"
-                headers += ",".join(self.analysis_results['pii'].columns) + "\n\n"
-                
-        if not headers:
-            headers = "No data selected for export"
-            
-        return headers
+        layout.addWidget(dest_group)
         
-    def export_data(self):
-        """Export the analysis results"""
-        if not self.analysis_results:
-            QMessageBox.warning(self, "Error", "No data available for export")
-            return
-            
-        # Get selected format
-        export_format = self.format_combo.currentText()
+        layout.addStretch()
+    
+    def setup_data_tab(self):
+        """Setup the data export tab for raw data export"""
+        layout = QVBoxLayout(self.data_tab)
         
-        # Ask for save location
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        default_filename = f"sharepoint_analysis_{timestamp}"
+        # Create description
+        description = QLabel("Export raw scan data for use in other applications")
+        description.setWordWrap(True)
+        layout.addWidget(description)
         
-        if export_format == "CSV":
-            file_filter = "CSV Files (*.csv)"
-            default_filename += ".csv"
-        elif export_format == "Excel":
-            file_filter = "Excel Files (*.xlsx)"
-            default_filename += ".xlsx"
-        elif export_format == "JSON":
-            file_filter = "JSON Files (*.json)"
-            default_filename += ".json"
-        else:  # Text Summary
+        # Create format options
+        format_group = QGroupBox("Data Format")
+        format_layout = QVBoxLayout(format_group)
+        
+        self.csv_radio = QRadioButton("CSV File")
+        self.excel_radio = QRadioButton("Excel Spreadsheet")
+        self.json_radio = QRadioButton("JSON File")
+        self.xml_radio = QRadioButton("XML File")
+        
+        self.csv_radio.setChecked(True)
+        
+        format_layout.addWidget(self.csv_radio)
+        format_layout.addWidget(self.excel_radio)
+        format_layout.addWidget(self.json_radio)
+        format_layout.addWidget(self.xml_radio)
+        
+        # Group radio buttons
+        self.data_format_group = QButtonGroup(self)
+        self.data_format_group.addButton(self.csv_radio)
+        self.data_format_group.addButton(self.excel_radio)
+        self.data_format_group.addButton(self.json_radio)
+        self.data_format_group.addButton(self.xml_radio)
+        
+        layout.addWidget(format_group)
+        
+        # Create content options
+        content_group = QGroupBox("Data Content")
+        content_layout = QVBoxLayout(content_group)
+        
+        self.export_all_files_check = QCheckBox("Export All Files")
+        self.export_all_files_check.setChecked(True)
+        
+        self.export_only_issues_check = QCheckBox("Export Only Files With Issues")
+        
+        self.include_paths_check = QCheckBox("Include Full Paths")
+        self.include_paths_check.setChecked(True)
+        
+        self.include_file_details_check = QCheckBox("Include File Details (size, type)")
+        self.include_file_details_check.setChecked(True)
+        
+        content_layout.addWidget(self.export_all_files_check)
+        content_layout.addWidget(self.export_only_issues_check)
+        content_layout.addWidget(self.include_paths_check)
+        content_layout.addWidget(self.include_file_details_check)
+        
+        # Connect checkboxes to handle mutual exclusion
+        self.export_all_files_check.stateChanged.connect(self.handle_data_export_options)
+        self.export_only_issues_check.stateChanged.connect(self.handle_data_export_options)
+        
+        layout.addWidget(content_group)
+        
+        # Add destination selector
+        dest_group = QGroupBox("Destination")
+        dest_layout = QHBoxLayout(dest_group)
+        
+        self.data_path_label = QLabel("Not selected")
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self.browse_data_destination)
+        
+        dest_layout.addWidget(QLabel("Save to:"))
+        dest_layout.addWidget(self.data_path_label, 1)
+        dest_layout.addWidget(browse_button)
+        
+        layout.addWidget(dest_group)
+        
+        layout.addStretch()
+    
+    def setup_summary_tab(self):
+        """Setup the summary export tab for executive summary"""
+        layout = QVBoxLayout(self.summary_tab)
+        
+        # Create description
+        description = QLabel("Generate a concise summary report of key findings")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        
+        # Create format options
+        format_group = QGroupBox("Summary Format")
+        format_layout = QVBoxLayout(format_group)
+        
+        self.summary_pdf_radio = QRadioButton("PDF Document")
+        self.summary_text_radio = QRadioButton("Text Document")
+        self.summary_email_radio = QRadioButton("Email Format")
+        
+        self.summary_pdf_radio.setChecked(True)
+        
+        format_layout.addWidget(self.summary_pdf_radio)
+        format_layout.addWidget(self.summary_text_radio)
+        format_layout.addWidget(self.summary_email_radio)
+        
+        # Group radio buttons
+        self.summary_format_group = QButtonGroup(self)
+        self.summary_format_group.addButton(self.summary_pdf_radio)
+        self.summary_format_group.addButton(self.summary_text_radio)
+        self.summary_format_group.addButton(self.summary_email_radio)
+        
+        layout.addWidget(format_group)
+        
+        # Create content options
+        content_group = QGroupBox("Summary Content")
+        content_layout = QVBoxLayout(content_group)
+        
+        self.summary_include_stats_check = QCheckBox("Include Statistics")
+        self.summary_include_stats_check.setChecked(True)
+        
+        self.summary_include_chart_check = QCheckBox("Include Overview Chart")
+        self.summary_include_chart_check.setChecked(True)
+        
+        self.summary_include_critical_check = QCheckBox("Include Critical Issues Only")
+        self.summary_include_critical_check.setChecked(True)
+        
+        self.summary_include_timeline_check = QCheckBox("Include Estimated Fix Timeline")
+        self.summary_include_timeline_check.setChecked(True)
+        
+        content_layout.addWidget(self.summary_include_stats_check)
+        content_layout.addWidget(self.summary_include_chart_check)
+        content_layout.addWidget(self.summary_include_critical_check)
+        content_layout.addWidget(self.summary_include_timeline_check)
+        
+        layout.addWidget(content_group)
+        
+        # Add destination selector
+        dest_group = QGroupBox("Destination")
+        dest_layout = QHBoxLayout(dest_group)
+        
+        self.summary_path_label = QLabel("Not selected")
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self.browse_summary_destination)
+        
+        dest_layout.addWidget(QLabel("Save to:"))
+        dest_layout.addWidget(self.summary_path_label, 1)
+        dest_layout.addWidget(browse_button)
+        
+        layout.addWidget(dest_group)
+        
+        layout.addStretch()
+    
+    def setup_custom_tab(self):
+        """Setup the custom export tab for advanced options"""
+        layout = QVBoxLayout(self.custom_tab)
+        
+        # Create description
+        description = QLabel("Create a custom export with specific fields and formatting")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        
+        # Create scroll area for many options
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # Output format
+        format_group = QGroupBox("Output Format")
+        format_layout = QGridLayout(format_group)
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["CSV", "Excel", "JSON", "XML", "Text", "HTML", "PDF"])
+        
+        self.delimiter_combo = QComboBox()
+        self.delimiter_combo.addItems([",", ";", "Tab", "|", "Space"])
+        
+        self.encoding_combo = QComboBox()
+        self.encoding_combo.addItems(["UTF-8", "ASCII", "ISO-8859-1", "Windows-1252"])
+        
+        # Add to layout
+        format_layout.addWidget(QLabel("Format:"), 0, 0)
+        format_layout.addWidget(self.format_combo, 0, 1)
+        format_layout.addWidget(QLabel("Delimiter:"), 1, 0)
+        format_layout.addWidget(self.delimiter_combo, 1, 1)
+        format_layout.addWidget(QLabel("Encoding:"), 2, 0)
+        format_layout.addWidget(self.encoding_combo, 2, 1)
+        
+        scroll_layout.addWidget(format_group)
+        
+        # Fields to include
+        fields_group = QGroupBox("Fields to Include")
+        fields_layout = QVBoxLayout(fields_group)
+        
+        self.include_field_filename = QCheckBox("Filename")
+        self.include_field_path = QCheckBox("Full Path")
+        self.include_field_size = QCheckBox("File Size")
+        self.include_field_modified = QCheckBox("Modified Date")
+        self.include_field_path_length = QCheckBox("Path Length")
+        self.include_field_issue_count = QCheckBox("Issue Count")
+        self.include_field_issue_types = QCheckBox("Issue Types")
+        self.include_field_severity = QCheckBox("Severity")
+        self.include_field_recommendations = QCheckBox("Recommendations")
+        
+        # Check all by default
+        for field in [self.include_field_filename, self.include_field_path,
+                     self.include_field_size, self.include_field_modified,
+                     self.include_field_path_length, self.include_field_issue_count,
+                     self.include_field_issue_types, self.include_field_severity,
+                     self.include_field_recommendations]:
+            field.setChecked(True)
+            fields_layout.addWidget(field)
+        
+        scroll_layout.addWidget(fields_group)
+        
+        # Filtering options
+        filter_group = QGroupBox("Filter Options")
+        filter_layout = QVBoxLayout(filter_group)
+        
+        self.filter_only_issues = QCheckBox("Only Items with Issues")
+        self.filter_min_severity = QCheckBox("Minimum Severity:")
+        
+        severity_layout = QHBoxLayout()
+        self.severity_combo = QComboBox()
+        self.severity_combo.addItems(["Critical", "Warning", "Info"])
+        severity_layout.addWidget(self.severity_combo)
+        severity_layout.addStretch()
+        
+        self.filter_issue_types = QCheckBox("Specific Issue Types:")
+        
+        issue_types_layout = QVBoxLayout()
+        self.issue_type_path_length = QCheckBox("Path Length")
+        self.issue_type_illegal_chars = QCheckBox("Illegal Characters")
+        self.issue_type_reserved_names = QCheckBox("Reserved Names")
+        self.issue_type_duplicates = QCheckBox("Duplicates")
+        
+        for issue_type in [self.issue_type_path_length, self.issue_type_illegal_chars,
+                         self.issue_type_reserved_names, self.issue_type_duplicates]:
+            issue_type.setChecked(True)
+            issue_types_layout.addWidget(issue_type)
+        
+        filter_layout.addWidget(self.filter_only_issues)
+        filter_layout.addWidget(self.filter_min_severity)
+        filter_layout.addLayout(severity_layout)
+        filter_layout.addWidget(self.filter_issue_types)
+        filter_layout.addLayout(issue_types_layout)
+        
+        # Connect checkboxes to enable/disable options
+        self.filter_min_severity.stateChanged.connect(
+            lambda state: self.severity_combo.setEnabled(state == Qt.Checked))
+        self.filter_issue_types.stateChanged.connect(
+            lambda state: self.toggle_issue_type_checks(state == Qt.Checked))
+        
+        # Initial state
+        self.severity_combo.setEnabled(False)
+        
+        scroll_layout.addWidget(filter_group)
+        
+        # Output options
+        output_group = QGroupBox("Output Options")
+        output_layout = QVBoxLayout(output_group)
+        
+        self.include_header_check = QCheckBox("Include Header Row")
+        self.include_header_check.setChecked(True)
+        
+        self.pretty_format_check = QCheckBox("Pretty Format (JSON/XML)")
+        self.pretty_format_check.setChecked(True)
+        
+        self.generate_stats_check = QCheckBox("Generate Statistics Page")
+        self.generate_stats_check.setChecked(True)
+        
+        output_layout.addWidget(self.include_header_check)
+        output_layout.addWidget(self.pretty_format_check)
+        output_layout.addWidget(self.generate_stats_check)
+        
+        scroll_layout.addWidget(output_group)
+        
+        # Add destination selector
+        dest_group = QGroupBox("Destination")
+        dest_layout = QHBoxLayout(dest_group)
+        
+        self.custom_path_label = QLabel("Not selected")
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self.browse_custom_destination)
+        
+        dest_layout.addWidget(QLabel("Save to:"))
+        dest_layout.addWidget(self.custom_path_label, 1)
+        dest_layout.addWidget(browse_button)
+        
+        scroll_layout.addWidget(dest_group)
+        scroll_layout.addStretch()
+        
+        # Set the scroll widget
+        scroll_area.setWidget(scroll_widget)
+        layout.addWidget(scroll_area)
+    
+    def toggle_issue_type_checks(self, enabled):
+        """Enable or disable issue type checkboxes"""
+        for issue_type in [self.issue_type_path_length, self.issue_type_illegal_chars,
+                         self.issue_type_reserved_names, self.issue_type_duplicates]:
+            issue_type.setEnabled(enabled)
+    
+    def handle_data_export_options(self, state):
+        """Handle mutual exclusion between data export options"""
+        sender = self.sender()
+        
+        if sender == self.export_all_files_check and state == Qt.Checked:
+            self.export_only_issues_check.setChecked(False)
+        elif sender == self.export_only_issues_check and state == Qt.Checked:
+            self.export_all_files_check.setChecked(False)
+    
+    def browse_report_destination(self):
+        """Open file dialog to select report destination"""
+        # Determine file filter based on selected format
+        if self.pdf_radio.isChecked():
+            file_filter = "PDF Files (*.pdf)"
+            default_ext = ".pdf"
+        elif self.html_radio.isChecked():
+            file_filter = "HTML Files (*.html)"
+            default_ext = ".html"
+        elif self.doc_radio.isChecked():
+            file_filter = "Word Documents (*.docx)"
+            default_ext = ".docx"
+        else:  # Text
             file_filter = "Text Files (*.txt)"
-            default_filename += ".txt"
-            
+            default_ext = ".txt"
+        
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Export", default_filename, file_filter
+            self,
+            "Save Report As",
+            "",
+            file_filter
         )
         
-        if not file_path:
-            return  # User cancelled
-            
-        try:
-            # Export based on format
-            if export_format == "CSV":
-                self._export_csv(file_path)
-            elif export_format == "Excel":
-                self._export_excel(file_path)
-            elif export_format == "JSON":
-                self._export_json(file_path)
-            else:  # Text Summary
-                self._export_text(file_path)
+        if file_path:
+            # Ensure file has correct extension
+            if not file_path.endswith(default_ext):
+                file_path += default_ext
                 
-            QMessageBox.information(self, "Success", f"Data exported successfully to {file_path}")
-            
-            # Show the exported file in the explorer
-            self._show_in_explorer(file_path)
-            
-        except Exception as exc:
-            logger.error(f"Error exporting data: {exc}")
-            QMessageBox.critical(self, "Error", f"Error exporting data: {str(exc)}")
-            
-    def _export_csv(self, file_path):
-        """
-        Export the analysis results to CSV
+            self.report_path_label.setText(file_path)
+    
+    def browse_data_destination(self):
+        """Open file dialog to select data export destination"""
+        # Determine file filter based on selected format
+        if self.csv_radio.isChecked():
+            file_filter = "CSV Files (*.csv)"
+            default_ext = ".csv"
+        elif self.excel_radio.isChecked():
+            file_filter = "Excel Files (*.xlsx)"
+            default_ext = ".xlsx"
+        elif self.json_radio.isChecked():
+            file_filter = "JSON Files (*.json)"
+            default_ext = ".json"
+        else:  # XML
+            file_filter = "XML Files (*.xml)"
+            default_ext = ".xml"
         
-        Args:
-            file_path (str): Path to save the CSV file
-        """
-        # For CSV, we'll export only one data frame at a time
-        # We'll use the filename as the base and add suffixes for each type
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Data Export As",
+            "",
+            file_filter
+        )
         
-        file_dir = os.path.dirname(file_path)
-        file_base = os.path.splitext(os.path.basename(file_path))[0]
-        
-        # Export name issues
-        if (self.export_all_check.isChecked() or self.export_name_check.isChecked()) and 'name_issues' in self.analysis_results:
-            name_issues_path = os.path.join(file_dir, f"{file_base}_name_issues.csv")
-            self.analysis_results['name_issues'].to_csv(name_issues_path, index=False)
-            
-        # Export path issues
-        if (self.export_all_check.isChecked() or self.export_path_check.isChecked()) and 'path_issues' in self.analysis_results:
-            path_issues_path = os.path.join(file_dir, f"{file_base}_path_issues.csv")
-            self.analysis_results['path_issues'].to_csv(path_issues_path, index=False)
-            
-        # Export duplicates
-        if (self.export_all_check.isChecked() or self.export_duplicate_check.isChecked()) and 'duplicates' in self.analysis_results:
-            duplicates_path = os.path.join(file_dir, f"{file_base}_duplicates.csv")
-            self.analysis_results['duplicates'].to_csv(duplicates_path, index=False)
-            
-        # Export PII
-        if (self.export_all_check.isChecked() or self.export_pii_check.isChecked()) and 'pii' in self.analysis_results:
-            pii_path = os.path.join(file_dir, f"{file_base}_pii.csv")
-            self.analysis_results['pii'].to_csv(pii_path, index=False)
-            
-        # Export summary
-        if self.export_summary_check.isChecked():
-            summary_path = os.path.join(file_dir, f"{file_base}_summary.txt")
-            with open(summary_path, 'w') as f:
-                f.write(self._generate_text_summary())
+        if file_path:
+            # Ensure file has correct extension
+            if not file_path.endswith(default_ext):
+                file_path += default_ext
                 
-    def _export_excel(self, file_path):
-        """
-        Export the analysis results to Excel
+            self.data_path_label.setText(file_path)
+    
+    def browse_summary_destination(self):
+        """Open file dialog to select summary destination"""
+        # Determine file filter based on selected format
+        if self.summary_pdf_radio.isChecked():
+            file_filter = "PDF Files (*.pdf)"
+            default_ext = ".pdf"
+        elif self.summary_text_radio.isChecked():
+            file_filter = "Text Files (*.txt)"
+            default_ext = ".txt"
+        else:  # Email
+            file_filter = "HTML Files (*.html)"
+            default_ext = ".html"
         
-        Args:
-            file_path (str): Path to save the Excel file
-        """
-        # Create an ExcelWriter object
-        try:
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                # Export name issues
-                if (self.export_all_check.isChecked() or self.export_name_check.isChecked()) and 'name_issues' in self.analysis_results:
-                    self.analysis_results['name_issues'].to_excel(writer, sheet_name='Name Issues', index=False)
-                    
-                # Export path issues
-                if (self.export_all_check.isChecked() or self.export_path_check.isChecked()) and 'path_issues' in self.analysis_results:
-                    self.analysis_results['path_issues'].to_excel(writer, sheet_name='Path Issues', index=False)
-                    
-                # Export duplicates
-                if (self.export_all_check.isChecked() or self.export_duplicate_check.isChecked()) and 'duplicates' in self.analysis_results:
-                    self.analysis_results['duplicates'].to_excel(writer, sheet_name='Duplicates', index=False)
-                    
-                # Export PII
-                if (self.export_all_check.isChecked() or self.export_pii_check.isChecked()) and 'pii' in self.analysis_results:
-                    self.analysis_results['pii'].to_excel(writer, sheet_name='PII', index=False)
-                    
-                # Export summary as a DataFrame
-                if self.export_summary_check.isChecked():
-                    # Create a simple DataFrame for the summary
-                    summary_text = self._generate_text_summary()
-                    summary_lines = summary_text.split('\n')
-                    summary_df = pd.DataFrame({'Summary': summary_lines})
-                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
-        except Exception as exc:
-            logger.error(f"Error exporting to Excel: {exc}")
-            raise
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Summary As",
+            "",
+            file_filter
+        )
+        
+        if file_path:
+            # Ensure file has correct extension
+            if not file_path.endswith(default_ext):
+                file_path += default_ext
                 
-    def _export_json(self, file_path):
-        """
-        Export the analysis results to JSON
+            self.summary_path_label.setText(file_path)
+    
+    def browse_custom_destination(self):
+        """Open file dialog to select custom export destination"""
+        # Determine file filter based on selected format
+        format_text = self.format_combo.currentText().lower()
         
-        Args:
-            file_path (str): Path to save the JSON file
-        """
-        # Create a dictionary to hold all the data
-        export_data = {
-            "metadata": {
-                "generated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "version": "1.0"
-            },
-            "summary": {
-                "name_issues_count": len(self.analysis_results.get('name_issues', pd.DataFrame())),
-                "path_issues_count": len(self.analysis_results.get('path_issues', pd.DataFrame())),
-                "duplicates_count": len(self.analysis_results.get('duplicates', pd.DataFrame())),
-                "pii_issues_count": len(self.analysis_results.get('pii', pd.DataFrame())),
-            }
+        if format_text == "csv":
+            file_filter = "CSV Files (*.csv)"
+            default_ext = ".csv"
+        elif format_text == "excel":
+            file_filter = "Excel Files (*.xlsx)"
+            default_ext = ".xlsx"
+        elif format_text == "json":
+            file_filter = "JSON Files (*.json)"
+            default_ext = ".json"
+        elif format_text == "xml":
+            file_filter = "XML Files (*.xml)"
+            default_ext = ".xml"
+        elif format_text == "text":
+            file_filter = "Text Files (*.txt)"
+            default_ext = ".txt"
+        elif format_text == "html":
+            file_filter = "HTML Files (*.html)"
+            default_ext = ".html"
+        else:  # PDF
+            file_filter = "PDF Files (*.pdf)"
+            default_ext = ".pdf"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Custom Export As",
+            "",
+            file_filter
+        )
+        
+        if file_path:
+            # Ensure file has correct extension
+            if not file_path.endswith(default_ext):
+                file_path += default_ext
+                
+            self.custom_path_label.setText(file_path)
+    
+    def generate_preview(self):
+        """Generate a preview of the export"""
+        if not self.scan_results:
+            self.preview_text.setText("No scan results available for preview")
+            return
+        
+        # Get the current tab to determine export type
+        current_tab_index = self.tabs.currentIndex()
+        tab_text = self.tabs.tabText(current_tab_index)
+        
+        preview_text = f"Preview of {tab_text}\n\n"
+        
+        if tab_text == "Report Export":
+            preview_text += self.generate_report_preview()
+        elif tab_text == "Data Export":
+            preview_text += self.generate_data_preview()
+        elif tab_text == "Summary Export":
+            preview_text += self.generate_summary_preview()
+        else:  # Custom Export
+            preview_text += self.generate_custom_preview()
+        
+        # Set preview text
+        self.preview_text.setText(preview_text)
+        
+        # Enable export button
+        self.export_button.setEnabled(True)
+    
+    def generate_report_preview(self):
+        """Generate a preview of the report export"""
+        preview = "=== SHAREPOINT MIGRATION SCAN REPORT ===\n\n"
+        
+        # Add summary if selected
+        if self.include_summary_check.isChecked():
+            preview += "--- Summary Statistics ---\n"
+            preview += f"Total Files: {self.scan_results.get('total_files', 0)}\n"
+            preview += f"Total Folders: {self.scan_results.get('total_folders', 0)}\n"
+            preview += f"Total Size: {self.format_size(self.scan_results.get('total_size', 0))}\n"
+            preview += f"Total Issues: {self.scan_results.get('total_issues', 0)}\n\n"
+        
+        # Add issues if selected
+        if self.include_issues_check.isChecked():
+            preview += "--- Issue Summary ---\n"
+            
+            # Path length issues
+            path_length_issues = self.scan_results.get('path_length_issues', {})
+            total_path_issues = sum(len(files) for files in path_length_issues.values())
+            preview += f"Path Length Issues: {total_path_issues}\n"
+            
+            # Illegal character issues
+            illegal_chars = self.scan_results.get('illegal_characters', {})
+            total_illegal_chars = sum(len(files) for files in illegal_chars.values())
+            preview += f"Illegal Character Issues: {total_illegal_chars}\n"
+            
+            # Reserved name issues
+            reserved_names = self.scan_results.get('reserved_names', {})
+            total_reserved = sum(len(files) for files in reserved_names.values())
+            preview += f"Reserved Name Issues: {total_reserved}\n"
+            
+            # Duplicate issues
+            duplicates = self.scan_results.get('duplicates', {})
+            total_duplicates = sum(max(0, len(files) - 1) for files in duplicates.values())
+            preview += f"Duplicate Files: {total_duplicates}\n\n"
+        
+        # Add charts placeholder if selected
+        if self.include_charts_check.isChecked():
+            preview += "--- Charts and Visualizations ---\n"
+            preview += "[Chart: Issue Type Distribution]\n"
+            preview += "[Chart: Path Length Distribution]\n"
+            preview += "[Chart: File Type Distribution]\n\n"
+        
+        # Add recommendations if selected
+        if self.include_recommendations_check.isChecked():
+            preview += "--- Recommendations ---\n"
+            preview += "1. Fix path length issues by relocating deep folder structures\n"
+            preview += "2. Rename files with illegal characters\n"
+            preview += "3. Address reserved name conflicts\n"
+            preview += "4. Consolidate duplicate files\n\n"
+        
+        # Add file format info
+        if self.pdf_radio.isChecked():
+            preview += "[This report will be exported as a PDF document]\n"
+        elif self.html_radio.isChecked():
+            preview += "[This report will be exported as an HTML document]\n"
+        elif self.doc_radio.isChecked():
+            preview += "[This report will be exported as a Word document]\n"
+        else:
+            preview += "[This report will be exported as a Text document]\n"
+        
+        # Add destination info if selected
+        destination = self.report_path_label.text()
+        if destination and destination != "Not selected":
+            preview += f"Export destination: {destination}\n"
+        
+        return preview
+    
+    def generate_data_preview(self):
+        """Generate a preview of the data export"""
+        preview = "=== DATA EXPORT PREVIEW ===\n\n"
+        
+        # Determine format
+        if self.csv_radio.isChecked():
+            format_str = "CSV"
+            delimiter = ","
+        elif self.excel_radio.isChecked():
+            format_str = "Excel"
+            delimiter = "\t"  # For preview purposes
+        elif self.json_radio.isChecked():
+            format_str = "JSON"
+            delimiter = None
+        else:  # XML
+            format_str = "XML"
+            delimiter = None
+        
+        # Generate header row for tabular formats
+        if format_str in ["CSV", "Excel"]:
+            headers = []
+            
+            if self.include_paths_check.isChecked():
+                headers.append("Path")
+            
+            headers.append("Filename")
+            
+            if self.include_file_details_check.isChecked():
+                headers.append("Size")
+                headers.append("Type")
+            
+            headers.append("Has Issues")
+            headers.append("Issue Count")
+            headers.append("Issue Types")
+            
+            # Add header row
+            preview += delimiter.join(headers) + "\n"
+            
+            # Add sample data rows (limit to 5 for preview)
+            file_structure = self.scan_results.get('file_structure', {})
+            
+            # Collect all files
+            all_files = []
+            for parent_path, children in file_structure.items():
+                if 'files' in children:
+                    for file_info in children['files']:
+                        # Include only files with issues if that option is selected
+                        if (self.export_only_issues_check.isChecked() and 
+                            ('issues' not in file_info or not file_info['issues'])):
+                            continue
+                        
+                        all_files.append(file_info)
+            
+            # Add sample rows (limit to 5)
+            for i, file_info in enumerate(all_files[:5]):
+                row = []
+                
+                if self.include_paths_check.isChecked():
+                    row.append(file_info.get('path', ''))
+                
+                row.append(file_info.get('name', ''))
+                
+                if self.include_file_details_check.isChecked():
+                    row.append(self.format_size(file_info.get('size', 0)))
+                    row.append(file_info.get('type', ''))
+                
+                has_issues = 'issues' in file_info and file_info['issues']
+                row.append("Yes" if has_issues else "No")
+                
+                issue_count = len(file_info.get('issues', []))
+                row.append(str(issue_count))
+                
+                issue_types = ", ".join([issue['type'] for issue in file_info.get('issues', [])])
+                row.append(issue_types)
+                
+                preview += delimiter.join(row) + "\n"
+            
+            # Add note if more files exist
+            if len(all_files) > 5:
+                preview += f"... and {len(all_files) - 5} more files\n"
+            
+        elif format_str == "JSON":
+            # Generate JSON preview
+            preview += "{\n"
+            preview += '  "scan_results": {\n'
+            preview += f'    "total_files": {self.scan_results.get("total_files", 0)},\n'
+            preview += f'    "total_folders": {self.scan_results.get("total_folders", 0)},\n'
+            preview += f'    "total_issues": {self.scan_results.get("total_issues", 0)},\n'
+            preview += '    "files": [\n'
+            preview += '      { "file1": "details..." },\n'
+            preview += '      { "file2": "details..." },\n'
+            preview += '      ...\n'
+            preview += '    ]\n'
+            preview += '  }\n'
+            preview += '}\n'
+        else:  # XML
+            # Generate XML preview
+            preview += '<?xml version="1.0" encoding="UTF-8"?>\n'
+            preview += '<scan_results>\n'
+            preview += f'  <total_files>{self.scan_results.get("total_files", 0)}</total_files>\n'
+            preview += f'  <total_folders>{self.scan_results.get("total_folders", 0)}</total_folders>\n'
+            preview += f'  <total_issues>{self.scan_results.get("total_issues", 0)}</total_issues>\n'
+            preview += '  <files>\n'
+            preview += '    <file path="...">\n'
+            preview += '      <name>...</name>\n'
+            preview += '      <size>...</size>\n'
+            preview += '      <issues>...</issues>\n'
+            preview += '    </file>\n'
+            preview += '    ...\n'
+            preview += '  </files>\n'
+            preview += '</scan_results>\n'
+        
+        # Add export info
+        preview += f"\n[This data will be exported as a {format_str} file"
+        
+        # Add destination info if selected
+        destination = self.data_path_label.text()
+        if destination and destination != "Not selected":
+            preview += f" to: {destination}"
+        
+        preview += "]\n"
+        
+        return preview
+    
+    def generate_summary_preview(self):
+        """Generate a preview of the summary export"""
+        preview = "=== EXECUTIVE SUMMARY ===\n\n"
+        
+        # Add title and date
+        from datetime import datetime
+        today = datetime.now().strftime("%B %d, %Y")
+        preview += f"SharePoint Migration Scan Summary - {today}\n\n"
+        
+        # Add statistics if selected
+        if self.summary_include_stats_check.isChecked():
+            preview += "--- Key Statistics ---\n"
+            preview += f"Total Files: {self.scan_results.get('total_files', 0)}\n"
+            preview += f"Total Size: {self.format_size(self.scan_results.get('total_size', 0))}\n"
+            preview += f"Total Issues: {self.scan_results.get('total_issues', 0)}\n\n"
+        
+        # Add chart placeholder if selected
+        if self.summary_include_chart_check.isChecked():
+            preview += "--- Overview Chart ---\n"
+            preview += "[Chart: Issue Distribution by Type]\n\n"
+        
+        # Add critical issues if selected
+        if self.summary_include_critical_check.isChecked():
+            preview += "--- Critical Issues ---\n"
+            
+            # Get critical issues
+            critical_issues = []
+            
+            # Path length issues over 250 characters
+            path_length_issues = self.scan_results.get('path_length_issues', {})
+            for length, files in path_length_issues.items():
+                if int(length) > 250:
+                    critical_issues.append(
+                        f"Path Length > 250 chars: {len(files)} files"
+                    )
+            
+            # Reserved names
+            reserved_names = self.scan_results.get('reserved_names', {})
+            total_reserved = sum(len(files) for files in reserved_names.values())
+            if total_reserved > 0:
+                critical_issues.append(
+                    f"Reserved Names: {total_reserved} files"
+                )
+            
+            # Illegal chars (* ? : etc.)
+            critical_chars = ['*', '?', ':', '\\', '/', '|', '<', '>', '"']
+            illegal_chars = self.scan_results.get('illegal_characters', {})
+            critical_char_count = sum(
+                len(files) for char, files in illegal_chars.items() 
+                if char in critical_chars
+            )
+            if critical_char_count > 0:
+                critical_issues.append(
+                    f"Critical Illegal Characters: {critical_char_count} files"
+                )
+            
+            # Add issues to preview
+            if critical_issues:
+                for issue in critical_issues:
+                    preview += f"• {issue}\n"
+            else:
+                preview += "No critical issues found.\n"
+            
+            preview += "\n"
+        
+        # Add timeline if selected
+        if self.summary_include_timeline_check.isChecked():
+            preview += "--- Estimated Fix Timeline ---\n"
+            
+            # Calculate estimated time
+            total_issues = self.scan_results.get('total_issues', 0)
+            
+            # Rough estimate: 5 minutes per issue
+            total_minutes = total_issues * 5
+            
+            if total_minutes < 60:
+                timeline = f"Less than 1 hour"
+            elif total_minutes < 480:  # 8 hours
+                hours = total_minutes // 60
+                timeline = f"Approximately {hours} hour{'s' if hours > 1 else ''}"
+            else:
+                days = total_minutes // 480  # 8-hour work days
+                timeline = f"Approximately {days} day{'s' if days > 1 else ''}"
+            
+            preview += f"Estimated fix time: {timeline}\n\n"
+        
+        # Add format info
+        if self.summary_pdf_radio.isChecked():
+            format_str = "PDF"
+        elif self.summary_text_radio.isChecked():
+            format_str = "Text"
+        else:
+            format_str = "Email-compatible HTML"
+        
+        preview += f"[This summary will be exported as a {format_str} document"
+        
+        # Add destination info if selected
+        destination = self.summary_path_label.text()
+        if destination and destination != "Not selected":
+            preview += f" to: {destination}"
+        
+        preview += "]\n"
+        
+        return preview
+    
+    def generate_custom_preview(self):
+        """Generate a preview of the custom export"""
+        preview = "=== CUSTOM EXPORT PREVIEW ===\n\n"
+        
+        # Get selected format
+        format_str = self.format_combo.currentText()
+        
+        # Add format-specific preview
+        if format_str in ["CSV", "Excel"]:
+            # Determine which fields to include
+            fields = []
+            
+            if self.include_field_filename.isChecked():
+                fields.append("Filename")
+            
+            if self.include_field_path.isChecked():
+                fields.append("Full Path")
+            
+            if self.include_field_size.isChecked():
+                fields.append("File Size")
+            
+            if self.include_field_modified.isChecked():
+                fields.append("Modified Date")
+            
+            if self.include_field_path_length.isChecked():
+                fields.append("Path Length")
+            
+            if self.include_field_issue_count.isChecked():
+                fields.append("Issue Count")
+            
+            if self.include_field_issue_types.isChecked():
+                fields.append("Issue Types")
+            
+            if self.include_field_severity.isChecked():
+                fields.append("Severity")
+            
+            if self.include_field_recommendations.isChecked():
+                fields.append("Recommendations")
+            
+            # Get delimiter
+            delimiter_text = self.delimiter_combo.currentText()
+            if delimiter_text == "Tab":
+                delimiter = "\t"
+            elif delimiter_text == "Space":
+                delimiter = " "
+            else:
+                delimiter = delimiter_text
+            
+            # Add header if selected
+            if self.include_header_check.isChecked():
+                preview += delimiter.join(fields) + "\n"
+            
+            # Add sample rows
+            preview += f"file1.docx{delimiter}C:\\path\\to\\file1.docx{delimiter}..."
+            if len(fields) > 2:
+                preview += f"{delimiter}..." * (len(fields) - 2)
+            preview += "\n"
+            
+            preview += f"file2.xlsx{delimiter}C:\\path\\to\\file2.xlsx{delimiter}..."
+            if len(fields) > 2:
+                preview += f"{delimiter}..." * (len(fields) - 2)
+            preview += "\n"
+        
+        elif format_str == "JSON":
+            # Add JSON preview
+            preview += "{\n"
+            
+            # Add pretty formatting if selected
+            if self.pretty_format_check.isChecked():
+                indent = "  "
+                preview += f"{indent}\"export_data\": [\n"
+                preview += f"{indent}{indent}{{\n"
+                
+                # Add fields based on selection
+                if self.include_field_filename.isChecked():
+                    preview += f"{indent}{indent}{indent}\"filename\": \"file1.docx\",\n"
+                
+                if self.include_field_path.isChecked():
+                    preview += f"{indent}{indent}{indent}\"path\": \"C:\\\\path\\\\to\\\\file1.docx\",\n"
+                
+                # Add more fields with ellipsis
+                preview += f"{indent}{indent}{indent}...\n"
+                
+                preview += f"{indent}{indent}}},\n"
+                preview += f"{indent}{indent}...\n"
+                preview += f"{indent}]\n"
+            else:
+                preview += "  \"export_data\":[{\"filename\":\"file1.docx\",\"path\":\"C:\\\\path\\\\to\\\\file1.docx\",...},...]"
+            
+            preview += "}\n"
+        
+        elif format_str == "XML":
+            # Add XML preview
+            preview += '<?xml version="1.0" encoding="UTF-8"?>\n'
+            
+            # Add pretty formatting if selected
+            if self.pretty_format_check.isChecked():
+                preview += '<export_data>\n'
+                preview += '  <file>\n'
+                
+                # Add fields based on selection
+                if self.include_field_filename.isChecked():
+                    preview += '    <filename>file1.docx</filename>\n'
+                
+                if self.include_field_path.isChecked():
+                    preview += '    <path>C:\\path\\to\\file1.docx</path>\n'
+                
+                # Add more fields with ellipsis
+                preview += '    ...\n'
+                
+                preview += '  </file>\n'
+                preview += '  ...\n'
+                preview += '</export_data>\n'
+            else:
+                preview += '<export_data><file><filename>file1.docx</filename>...</file>...</export_data>\n'
+        
+        else:
+            # Text, HTML, PDF
+            preview += f"Custom {format_str} export preview\n"
+            preview += "This would include:\n"
+            
+            # List selected fields
+            if self.include_field_filename.isChecked():
+                preview += "- Filename\n"
+            
+            if self.include_field_path.isChecked():
+                preview += "- Full Path\n"
+            
+            # List more fields with ellipsis
+            preview += "- ...\n"
+        
+        # Add filter info
+        preview += "\nFilters applied:\n"
+        
+        if self.filter_only_issues.isChecked():
+            preview += "- Only items with issues\n"
+        
+        if self.filter_min_severity.isChecked():
+            severity = self.severity_combo.currentText()
+            preview += f"- Minimum severity: {severity}\n"
+        
+        if self.filter_issue_types.isChecked():
+            preview += "- Specific issue types:\n"
+            
+            if self.issue_type_path_length.isChecked():
+                preview += "  • Path Length\n"
+            
+            if self.issue_type_illegal_chars.isChecked():
+                preview += "  • Illegal Characters\n"
+            
+            if self.issue_type_reserved_names.isChecked():
+                preview += "  • Reserved Names\n"
+            
+            if self.issue_type_duplicates.isChecked():
+                preview += "  • Duplicates\n"
+        
+        # Add format info
+        preview += f"\n[This data will be exported as a {format_str} file"
+        
+        # Add destination info if selected
+        destination = self.custom_path_label.text()
+        if destination and destination != "Not selected":
+            preview += f" to: {destination}"
+        
+        preview += "]\n"
+        
+        return preview
+    
+    def perform_export(self):
+        """Perform the actual export operation"""
+        # Get the current tab to determine export type
+        current_tab_index = self.tabs.currentIndex()
+        tab_text = self.tabs.tabText(current_tab_index)
+        
+        # Create options dictionary to pass to backend
+        export_options = {
+            'type': tab_text.replace(' Export', '').lower(),
+            'destination': '',
+            'format': '',
+            'options': {}
         }
         
-        # Add the detailed data
-        if self.export_all_check.isChecked() or self.export_name_check.isChecked():
-            if 'name_issues' in self.analysis_results:
-                export_data["name_issues"] = self.analysis_results['name_issues'].to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_path_check.isChecked():
-            if 'path_issues' in self.analysis_results:
-                export_data["path_issues"] = self.analysis_results['path_issues'].to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_duplicate_check.isChecked():
-            if 'duplicates' in self.analysis_results:
-                export_data["duplicates"] = self.analysis_results['duplicates'].to_dict('records')
-                
-        if self.export_all_check.isChecked() or self.export_pii_check.isChecked():
-            if 'pii' in self.analysis_results:
-                export_data["pii"] = self.analysis_results['pii'].to_dict('records')
-                
-        # Write to file
-        try:
-            with open(file_path, 'w') as f:
-                json.dump(export_data, f, indent=2, default=str)
-        except Exception as exc:
-            logger.error(f"Error exporting to JSON: {exc}")
-            raise
+        # Set destination and format based on tab
+        if tab_text == "Report Export":
+            export_options['destination'] = self.report_path_label.text()
             
-    def _export_text(self, file_path):
-        """
-        Export the analysis results to a text file
-        
-        Args:
-            file_path (str): Path to save the text file
-        """
-        # Generate the text summary
-        summary = self._generate_text_summary()
-        
-        # Write to file
-        try:
-            with open(file_path, 'w') as f:
-                f.write(summary)
-        except Exception as exc:
-            logger.error(f"Error exporting to text file: {exc}")
-            raise
+            if self.pdf_radio.isChecked():
+                export_options['format'] = 'pdf'
+            elif self.html_radio.isChecked():
+                export_options['format'] = 'html'
+            elif self.doc_radio.isChecked():
+                export_options['format'] = 'docx'
+            else:  # Text
+                export_options['format'] = 'txt'
             
-    def _show_in_explorer(self, file_path):
-        """
-        Show the exported file in the file explorer
+            # Add report-specific options
+            export_options['options'] = {
+                'include_summary': self.include_summary_check.isChecked(),
+                'include_issues': self.include_issues_check.isChecked(),
+                'include_charts': self.include_charts_check.isChecked(),
+                'include_recommendations': self.include_recommendations_check.isChecked()
+            }
+            
+        elif tab_text == "Data Export":
+            export_options['destination'] = self.data_path_label.text()
+            
+            if self.csv_radio.isChecked():
+                export_options['format'] = 'csv'
+            elif self.excel_radio.isChecked():
+                export_options['format'] = 'xlsx'
+            elif self.json_radio.isChecked():
+                export_options['format'] = 'json'
+            else:  # XML
+                export_options['format'] = 'xml'
+            
+            # Add data-specific options
+            export_options['options'] = {
+                'export_all_files': self.export_all_files_check.isChecked(),
+                'export_only_issues': self.export_only_issues_check.isChecked(),
+                'include_paths': self.include_paths_check.isChecked(),
+                'include_file_details': self.include_file_details_check.isChecked()
+            }
+            
+        elif tab_text == "Summary Export":
+            export_options['destination'] = self.summary_path_label.text()
+            
+            if self.summary_pdf_radio.isChecked():
+                export_options['format'] = 'pdf'
+            elif self.summary_text_radio.isChecked():
+                export_options['format'] = 'txt'
+            else:  # Email
+                export_options['format'] = 'html'
+            
+            # Add summary-specific options
+            export_options['options'] = {
+                'include_stats': self.summary_include_stats_check.isChecked(),
+                'include_chart': self.summary_include_chart_check.isChecked(),
+                'include_critical': self.summary_include_critical_check.isChecked(),
+                'include_timeline': self.summary_include_timeline_check.isChecked()
+            }
+            
+        else:  # Custom Export
+            export_options['destination'] = self.custom_path_label.text()
+            export_options['format'] = self.format_combo.currentText().lower()
+            
+            # Add custom-specific options
+            field_options = {}
+            if self.include_field_filename.isChecked():
+                field_options['filename'] = True
+            if self.include_field_path.isChecked():
+                field_options['path'] = True
+            if self.include_field_size.isChecked():
+                field_options['size'] = True
+            if self.include_field_modified.isChecked():
+                field_options['modified'] = True
+            if self.include_field_path_length.isChecked():
+                field_options['path_length'] = True
+            if self.include_field_issue_count.isChecked():
+                field_options['issue_count'] = True
+            if self.include_field_issue_types.isChecked():
+                field_options['issue_types'] = True
+            if self.include_field_severity.isChecked():
+                field_options['severity'] = True
+            if self.include_field_recommendations.isChecked():
+                field_options['recommendations'] = True
+            
+            filter_options = {}
+            if self.filter_only_issues.isChecked():
+                filter_options['only_issues'] = True
+            if self.filter_min_severity.isChecked():
+                filter_options['min_severity'] = self.severity_combo.currentText()
+            if self.filter_issue_types.isChecked():
+                issue_types = []
+                if self.issue_type_path_length.isChecked():
+                    issue_types.append('path_length')
+                if self.issue_type_illegal_chars.isChecked():
+                    issue_types.append('illegal_chars')
+                if self.issue_type_reserved_names.isChecked():
+                    issue_types.append('reserved_names')
+                if self.issue_type_duplicates.isChecked():
+                    issue_types.append('duplicates')
+                filter_options['issue_types'] = issue_types
+            
+            format_options = {
+                'delimiter': self.delimiter_combo.currentText(),
+                'encoding': self.encoding_combo.currentText(),
+                'include_header': self.include_header_check.isChecked(),
+                'pretty_format': self.pretty_format_check.isChecked(),
+                'generate_stats': self.generate_stats_check.isChecked()
+            }
+            
+            export_options['options'] = {
+                'fields': field_options,
+                'filters': filter_options,
+                'format_options': format_options
+            }
         
-        Args:
-            file_path (str): Path to the exported file
-        """
-        try:
-            if os.name == 'nt':  # Windows
-                # Use the fully qualified path for explorer.exe on Windows
-                explorer_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'explorer.exe')
-                if os.path.exists(explorer_path):
-                    # Use a list for arguments instead of shell=True
-                    subprocess.Popen([explorer_path, '/select,', os.path.normpath(file_path)], shell=False)
-                else:
-                    logger.warning(f"Windows Explorer not found at {explorer_path}")
-            elif os.name == 'posix':  # macOS and Linux
-                if os.path.exists('/usr/bin/open'):  # macOS
-                    # Use full path on macOS
-                    subprocess.Popen(['/usr/bin/open', os.path.dirname(file_path)], shell=False)
-                else:  # Linux
-                    # Check if xdg-open exists and get its full path
-                    xdg_open_path = shutil.which('xdg-open')
-                    if xdg_open_path:
-                        subprocess.Popen([xdg_open_path, os.path.dirname(file_path)], shell=False)
-                    else:
-                        logger.warning("Could not find file explorer command on this system")
-        except Exception as exc:
-            logger.warning(f"Error showing file in explorer: {exc}")
-            # This is a non-critical error, so just log it but don't propagate the exception
+        # Validate destination
+        if not export_options['destination'] or export_options['destination'] == "Not selected":
+            self.preview_text.setText("Please select a destination file before exporting")
+            return
+        
+        # Emit signal to perform export
+        self.export_requested.emit(export_options)
+        
+        # Show confirmation
+        self.preview_text.setText(f"Export initiated.\nExporting to: {export_options['destination']}")
+    
+    def update_with_results(self, results):
+        """Update the export widget with scan results"""
+        self.scan_results = results
+        
+        # Clear preview
+        self.preview_text.setText("Scan results loaded. Generate a preview to see export format.")
+        
+        # Disable export button until preview is generated
+        self.export_button.setEnabled(False)
+    
+    def format_size(self, size_bytes):
+        """Format size in bytes to human-readable string"""
+        if size_bytes < 1024:
+            return f"{size_bytes} bytes"
+        elif size_bytes < 1024*1024:
+            return f"{size_bytes/1024:.1f} KB"
+        elif size_bytes < 1024*1024*1024:
+            return f"{size_bytes/(1024*1024):.1f} MB"
+        else:
+            return f"{size_bytes/(1024*1024*1024):.2f} GB"
