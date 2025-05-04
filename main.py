@@ -13,6 +13,7 @@ Features:
   - SharePoint Naming Compliance: Detects and fixes illegal characters
   - Path Length Reduction: Identifies paths exceeding SharePoint's 256 character limit
   - Duplicate File Detection: Finds exact and similar duplicates
+  - Detailed File Analysis: Examines individual files for SharePoint compatibility
 - Flexible Cleanup Options:
   - Manual Mode: Non-destructively copies cleaned data to a new folder
   - Automatic Mode: Cleans data and uploads directly to SharePoint

@@ -16,6 +16,9 @@ from ui.dashboard import DashboardWidget
 # Import Enhanced Data View
 from ui.enhanced_data_view import EnhancedDataView
 
+# Import the new File Analysis Tab
+from ui.file_analysis_tab import FileAnalysisTab
+
 # Simple placeholder for DataProcessor
 class SimpleDataProcessor:
     """Simple placeholder for DataProcessor to get the UI working"""
@@ -353,6 +356,10 @@ class MainWindow(QMainWindow):
         self.analysis_tab = AnalysisTab()
         self.tabs.addTab(self.analysis_tab, "Analysis")
         
+        # Add File Analysis tab (NEW)
+        self.file_analysis_tab = FileAnalysisTab()
+        self.tabs.addTab(self.file_analysis_tab, "File Analysis")
+        
         # Add Migration tab (placeholder)
         self.migration_tab = MigrationTab()
         self.tabs.addTab(self.migration_tab, "Migration")
@@ -395,6 +402,11 @@ class MainWindow(QMainWindow):
         analyze_action.triggered.connect(self.go_to_analysis)
         tools_menu.addAction(analyze_action)
         
+        # Add file analysis action (NEW)
+        file_analysis_action = QAction("&File Analysis", self)
+        file_analysis_action.triggered.connect(self.go_to_file_analysis)
+        tools_menu.addAction(file_analysis_action)
+        
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
         
@@ -421,6 +433,10 @@ class MainWindow(QMainWindow):
             
             if hasattr(self.migration_tab, 'source_edit') and hasattr(self.migration_tab.source_edit, 'setText'):
                 self.migration_tab.source_edit.setText(folder)
+            
+            # Update source in File Analysis tab (NEW)
+            if hasattr(self.file_analysis_tab, 'source_edit') and hasattr(self.file_analysis_tab.source_edit, 'setText'):
+                self.file_analysis_tab.source_edit.setText(folder)
     
     def start_scan(self):
         """Start scanning process"""
@@ -453,6 +469,10 @@ class MainWindow(QMainWindow):
             if hasattr(self.analysis_tab, 'update_data_view'):
                 self.analysis_tab.update_data_view(results)
             
+            # Update File Analysis tab with results (NEW)
+            if hasattr(self.file_analysis_tab, 'update_with_results'):
+                self.file_analysis_tab.update_with_results(results)
+            
             # Switch to dashboard tab
             self.tabs.setCurrentIndex(0)
         
@@ -474,18 +494,24 @@ class MainWindow(QMainWindow):
     
     def export_report(self):
         """Export the current scan results"""
-        if hasattr(self.analysis_tab, 'enhanced_view') and hasattr(self.analysis_tab.enhanced_view, 'show_export_menu'):
-            # Switch to Analysis tab
-            self.tabs.setCurrentIndex(1)  # Assuming Analysis is the second tab
-            
-            # Show export menu
+        current_tab = self.tabs.currentIndex()
+        
+        if current_tab == 1 and hasattr(self.analysis_tab, 'enhanced_view') and hasattr(self.analysis_tab.enhanced_view, 'show_export_menu'):
+            # Analysis tab export
             self.analysis_tab.enhanced_view.show_export_menu()
+        elif current_tab == 2 and hasattr(self.file_analysis_tab, 'file_analysis_view') and hasattr(self.file_analysis_tab.file_analysis_view, 'show_export_menu'):
+            # File Analysis tab export (NEW)
+            self.file_analysis_tab.file_analysis_view.show_export_menu()
         else:
-            QMessageBox.information(self, "Export", "No data available to export.")
+            QMessageBox.information(self, "Export", "No data available to export or export not supported in this tab.")
     
     def go_to_analysis(self):
         """Switch to the Analysis tab"""
         self.tabs.setCurrentIndex(1)  # Assuming Analysis is the second tab
+    
+    def go_to_file_analysis(self):
+        """Switch to the File Analysis tab (NEW)"""
+        self.tabs.setCurrentIndex(2)  # Assuming File Analysis is the third tab
     
     def show_about(self):
         """Show about dialog"""
