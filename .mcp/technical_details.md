@@ -7,9 +7,16 @@
 - Office365-REST-Python-Client for SharePoint connectivity
 - pytest for testing
 
+## Key Components
+- **FileSystemScanner**: Enhanced scanner that collects comprehensive file metadata
+- **FileAnalysisView**: Interactive UI component for detailed file analysis
+- **FileAnalysisTab**: Tab component integrating file analysis into the main window
+- **EnhancedDataView**: Basic data grid with sorting and filtering capabilities
+
 ## Key Data Structures
 - File metadata stored in pandas DataFrames
 - Analysis results stored as a dictionary of DataFrames by issue type
+- File-to-issues mapping for efficient issue lookup
 - All data kept in-memory only, no persistent storage
 
 ## Data Flow
@@ -17,6 +24,7 @@
    - Traverse file system collecting metadata (path, name, size, creation date, etc.)
    - Calculate file hashes for duplicate detection
    - Store all data in memory as pandas DataFrames
+   - FileSystemScanner collects comprehensive metadata for each file
 
 2. **Analysis Phase**: 
    - Apply analyzers to identify issues
@@ -25,17 +33,39 @@
    - Duplicate finder identifies identical files using content hashes
    - PII detector (placeholder) flags potential sensitive information
 
-3. **Cleaning Phase**: 
+3. **Display Phase**:
+   - Dashboard provides summary visualization
+   - Analysis tab shows issue-based analysis
+   - File Analysis tab shows detailed file-level information
+   - Files with issues are highlighted with a light red background
+   - Issues are displayed in the details panel when a file is selected
+
+4. **Cleaning Phase**: 
    - Apply selected fixes based on user preferences
    - Name fixer corrects illegal characters and reserved names
    - Path shortener reduces path length using various strategies
    - Deduplicator handles duplicate files according to selected strategy
    - All changes are non-destructive (copied to new location)
 
-4. **Upload Phase** (optional): 
+5. **Upload Phase** (optional): 
    - Connect to SharePoint using configured authentication
    - Upload cleaned files with proper folder structure
    - Provide progress and status feedback
+
+## User Interface Components
+- **Main Window**: The application's primary window with tabs
+- **Dashboard**: Summary view of scan results
+- **Analysis Tab**: Issue-focused analysis
+- **File Analysis Tab**: File-focused detailed analysis
+- **Migration Tab**: Controls for cleaning and uploading
+
+## File Analysis Features
+- **Comprehensive Metadata Display**: View all metadata for each file
+- **Issue Highlighting**: Files with issues are visually highlighted
+- **Interactive Filtering**: Filter files by various criteria including issue types
+- **Detailed Issue View**: See specific issues for each selected file
+- **Export Options**: Export analysis in various formats (CSV, Excel, JSON, Text)
+- **Context Menu**: Right-click options for common operations
 
 ## Multithreading Architecture
 - Scanner runs in its own thread to keep UI responsive
@@ -72,13 +102,3 @@
 - Mock classes for external dependencies
 - Test fixtures for controlled environments
 - Test data generation for realistic scenarios
-
-## Test Data Generation
-- Creates directory structure with various SharePoint migration challenges
-- Configurable complexity level (simple, normal, complex)
-- Includes:
-  - Files with illegal characters
-  - Deep directory structures exceeding path limits
-  - Duplicate files with identical content
-  - Mock PII data for testing detection
-  - Files with spaces and special characters
