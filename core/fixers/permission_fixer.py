@@ -2,19 +2,29 @@
 import os
 import shutil
 import stat
+import logging
+
+logger = logging.getLogger('sharepoint_migration_tool')
 
 class PermissionFixer:
     """Fixes permission issues with files, particularly read-only files"""
     
-    def __init__(self):
-        pass
+    def __init__(self, config=None):
+        """
+        Initialize the permission fixer with configuration
+        
+        Args:
+            config (dict, optional): Configuration options
+        """
+        self.config = config or {}
+        logger.info("PermissionFixer initialized")
     
     def fix_permissions(self, file_path):
         """
         Fix permissions on a file, making it writable if it's read-only
         
         Args:
-            file_path: Path to the file to fix
+            file_path (str): Path to the file to fix
             
         Returns:
             bool: True if permissions were fixed, False otherwise
@@ -22,12 +32,16 @@ class PermissionFixer:
         try:
             # Check if file is read-only
             if not os.access(file_path, os.W_OK):
+                logger.info(f"Making file writable: {file_path}")
+                
                 # Make file writable by modifying its mode
                 os.chmod(file_path, stat.S_IWRITE | stat.S_IREAD)
                 return True
+                
             return False  # No change needed
+            
         except Exception as e:
-            print(f"Error fixing permissions for {file_path}: {e}")
+            logger.error(f"Error fixing permissions for {file_path}: {e}")
             return False
     
     def fix_file(self, src_path, dest_dir, preserve_structure=True):
@@ -35,12 +49,12 @@ class PermissionFixer:
         Fix a file's permissions and copy it to the destination directory
         
         Args:
-            src_path: Source file path
-            dest_dir: Destination directory
-            preserve_structure: Whether to preserve the directory structure
+            src_path (str): Source file path
+            dest_dir (str): Destination directory
+            preserve_structure (bool): Whether to preserve the directory structure
             
         Returns:
-            Tuple: (success, new_path)
+            tuple: (success, new_path)
         """
         try:
             # First, fix permissions on the source file so we can read it
@@ -63,7 +77,9 @@ class PermissionFixer:
             # Ensure the copied file is not read-only
             os.chmod(dest_path, stat.S_IWRITE | stat.S_IREAD)
             
+            logger.info(f"Successfully fixed permissions for {src_path} and copied to {dest_path}")
             return True, dest_path
+            
         except Exception as e:
-            print(f"Error fixing permissions for {src_path}: {e}")
+            logger.error(f"Error fixing permissions for {src_path}: {e}")
             return False, None

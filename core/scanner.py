@@ -65,6 +65,13 @@ class Scanner(QThread):
                 'duplicates': {}
             }
             
+            # Verify source folder exists before scanning
+            if not self.source_folder or not os.path.exists(self.source_folder):
+                error_msg = f"Source folder not found or invalid: {self.source_folder}"
+                logger.error(error_msg)
+                self.error_occurred.emit(error_msg)
+                return
+            
             # Scan directory recursively
             self._scan_directory(self.source_folder, results)
             
@@ -111,78 +118,92 @@ class Scanner(QThread):
             total_count = 0
             
             # Pre-count files to provide better progress updates
-            for root, dirs, files in os.walk(directory):
-                total_count += len(files)
+            try:
+                total_count = sum(len(files) for _, _, files in os.walk(directory))
+            except Exception as e:
+                logger.warning(f"Error counting files: {e}")
+                total_count = 0
                 
             if total_count == 0:
                 total_count = 1  # Avoid division by zero
-                
-            # Now do the actual scan
-            for root, dirs, files in os.walk(directory):
-                # Check for interruption
-                if self.is_interrupted:
-                    return
-                    
-                # Process folders
-                for dir_name in dirs:
-                    # Check for interruption
-                    if self.is_interrupted:
-                        return
-                        
-                    dir_path = os.path.join(root, dir_name)
-                    results['total_folders'] += 1
-                    
-                    # Add to file structure
-                    parent_dir = os.path.dirname(dir_path)
-                    if parent_dir in results['file_structure']:
-                        folder_info = {
-                            'path': dir_path,
-                            'name': dir_name
-                        }
-                        results['file_structure'][parent_dir]['folders'].append(folder_info)
-                
-                # Process files
-                for file_name in files:
-                    # Check for interruption
-                    if self.is_interrupted:
-                        return
-                        
-                    file_path = os.path.join(root, file_name)
-                    
-                    try:
-                        file_size = os.path.getsize(file_path)
-                    except Exception as e:
-                        logger.warning(f"Could not get size for {file_path}: {e}")
-                        file_size = 0
-                    
-                    # Update totals
-                    results['total_files'] += 1
-                    results['total_size'] += file_size
-                    
-                    # Add to file structure
-                    parent_dir = os.path.dirname(file_path)
-                    if parent_dir in results['file_structure']:
-                        file_info = {
-                            'path': file_path,
-                            'name': file_name,
-                            'size': file_size,
-                            'extension': os.path.splitext(file_name)[1],
-                            'issues': []
-                        }
-                        results['file_structure'][parent_dir]['files'].append(file_info)
-                    
-                    # Update progress
-                    file_count += 1
-                    progress_percent = int((file_count / total_count) * 100)
-                    self.progress_updated.emit(file_count, total_count)
-                    
-                    # Log progress at intervals
-                    if file_count % 100 == 0:
-                        logger.debug(f"Scanned {file_count} of {total_count} files ({progress_percent}%)")
             
-            # Final progress update
-            self.progress_updated.emit(file_count, total_count)
-            logger.info(f"Directory scan complete: {file_count} files in {results['total_folders']} folders")
+            try:
+                # Now do the actual scan
+                for root, dirs, files in os.walk(directory):
+                    # Check for interruption
+                    if self.is_interrupted:
+                        return
+                        
+                    # Process folders
+                    for dir_name in dirs:
+                        # Check for interruption
+                        if self.is_interrupted:
+                            return
+                            
+                        dir_path = os.path.join(root, dir_name)
+                        results['total_folders'] += 1
+                        
+                        # Add to file structure
+                        parent_dir = os.path.dirname(dir_path)
+                        if parent_dir in results['file_structure']:
+                            try:
+                                folder_info = {
+                                    'path': dir_path,
+                                    'name': dir_name
+                                }
+                                results['file_structure'][parent_dir]['folders'].append(folder_info)
+                            except Exception as e:
+                                logger.warning(f"Error adding folder {dir_path} to structure: {e}")
+                    
+                    # Process files
+                    for file_name in files:
+                        # Check for interruption
+                        if self.is_interrupted:
+                            return
+                            
+                        file_path = os.path.join(root, file_name)
+                        
+                        try:
+                            file_size = os.path.getsize(file_path)
+                        except Exception as e:
+                            logger.warning(f"Could not get size for {file_path}: {e}")
+                            file_size = 0
+                        
+                        # Update totals
+                        results['total_files'] += 1
+                        results['total_size'] += file_size
+                        
+                        # Add to file structure
+                        parent_dir = os.path.dirname(file_path)
+                        if parent_dir in results['file_structure']:
+                            try:
+                                file_info = {
+                                    'path': file_path,
+                                    'name': file_name,
+                                    'size': file_size,
+                                    'extension': os.path.splitext(file_name)[1],
+                                    'issues': []
+                                }
+                                results['file_structure'][parent_dir]['files'].append(file_info)
+                            except Exception as e:
+                                logger.warning(f"Error adding file {file_path} to structure: {e}")
+                        
+                        # Update progress
+                        file_count += 1
+                        progress_percent = int((file_count / total_count) * 100)
+                        self.progress_updated.emit(file_count, total_count)
+                        
+                        # Log progress at intervals
+                        if file_count % 100 == 0:
+                            logger.debug(f"Scanned {file_count} of {total_count} files ({progress_percent}%)")
+                
+                # Final progress update
+                self.progress_updated.emit(file_count, total_count)
+                logger.info(f"Directory scan complete: {file_count} files in {results['total_folders']} folders")
+            except Exception as e:
+                logger.error(f"Error during directory walk: {e}")
+                error_msg = f"Error scanning directory {directory}: {str(e)}"
+                self.error_occurred.emit(error_msg)
             
         except Exception as e:
             error_msg = f"Error scanning directory {directory}: {str(e)}"
