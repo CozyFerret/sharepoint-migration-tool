@@ -12,16 +12,18 @@ security-scan:
       pip install bandit
   - name: Scan with bandit
     run: |
-      # Run a comprehensive security scan with detailed output
-      bandit -r . -x ./tests,./venv -f txt -o bandit-output.txt
-      # Check the return code - bandit returns non-zero if issues are found
-      if [ $? -ne 0 ]; then
-        echo "Security issues found. See bandit-output.txt for details."
-        # Show the issues but don't fail the build yet (make this stricter later)
-        cat bandit-output.txt
-        # Return success for now to allow the workflow to continue
-        exit 0
-      fi
+      # Option 1: Use the config file approach (recommended)
+      # Make sure you've added the .bandit file to your repository
+      bandit -r . -x ./tests,./venv -c .bandit -f txt -o bandit-output.txt
+      
+      # Option 2: Use command line to ignore specific tests
+      # bandit -r . -x ./tests,./venv -s B404,B603,B607,B110 -f txt -o bandit-output.txt
+      
+      # Option 3: Allow the build to proceed despite issues
+      # bandit -r . -x ./tests,./venv || true
+      
+      # Display the output for review
+      cat bandit-output.txt
   - name: Upload security scan results
     uses: actions/upload-artifact@v3
     with:
