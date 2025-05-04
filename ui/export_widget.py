@@ -11,6 +11,9 @@ import logging
 import json
 import pandas as pd
 import csv
+import shutil
+import subprocess
+from pathlib import Path
 from datetime import datetime
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QPushButton, QComboBox, QFileDialog, QGroupBox,
@@ -567,17 +570,24 @@ class ExportWidget(QWidget):
         """
         try:
             if os.name == 'nt':  # Windows
-                import subprocess
-                subprocess.Popen(f'explorer /select,"{file_path}"')
+                # Use the fully qualified path for explorer.exe on Windows
+                explorer_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'explorer.exe')
+                if os.path.exists(explorer_path):
+                    # Use a list for arguments instead of shell=True
+                    subprocess.Popen([explorer_path, '/select,', os.path.normpath(file_path)], shell=False)
+                else:
+                    logger.warning(f"Windows Explorer not found at {explorer_path}")
             elif os.name == 'posix':  # macOS and Linux
-                import subprocess
                 if os.path.exists('/usr/bin/open'):  # macOS
-                    subprocess.Popen(['open', os.path.dirname(file_path)])
+                    # Use full path on macOS
+                    subprocess.Popen(['/usr/bin/open', os.path.dirname(file_path)], shell=False)
                 else:  # Linux
-                    try:
-                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
-                    except Exception:
-                        pass  # Silently fail if unable to open file explorer
+                    # Check if xdg-open exists and get its full path
+                    xdg_open_path = shutil.which('xdg-open')
+                    if xdg_open_path:
+                        subprocess.Popen([xdg_open_path, os.path.dirname(file_path)], shell=False)
+                    else:
+                        logger.warning("Could not find file explorer command on this system")
         except Exception as exc:
             logger.warning(f"Error showing file in explorer: {exc}")
-            # Non-critical error, just log it
+            # This is a non-critical error, so just log it but don't propagate the exception

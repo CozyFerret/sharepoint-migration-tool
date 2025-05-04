@@ -12,10 +12,18 @@ security-scan:
       pip install bandit
   - name: Scan with bandit
     run: |
-      # Run a security scan with specific settings to skip the B110 check 
-      # or other specific issues that you've evaluated and accepted
-      bandit -r . -x ./tests,./venv --skip B110 || true
-      
-      # Alternatively, you can use a bandit configuration file
-      # Create a .bandit file in your repository with custom rules
-      # bandit -r . -x ./tests,./venv -c .bandit
+      # Run a comprehensive security scan with detailed output
+      bandit -r . -x ./tests,./venv -f txt -o bandit-output.txt
+      # Check the return code - bandit returns non-zero if issues are found
+      if [ $? -ne 0 ]; then
+        echo "Security issues found. See bandit-output.txt for details."
+        # Show the issues but don't fail the build yet (make this stricter later)
+        cat bandit-output.txt
+        # Return success for now to allow the workflow to continue
+        exit 0
+      fi
+  - name: Upload security scan results
+    uses: actions/upload-artifact@v3
+    with:
+      name: security-scan-results
+      path: bandit-output.txt
