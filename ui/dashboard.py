@@ -1,6 +1,13 @@
+"""
+Dashboard Widget for SharePoint Migration Tool
+
+This module provides visualization of scan results and summary statistics.
+"""
+
 import pandas as pd  # Add this import at the top of the file
 import os
 import logging
+import numpy as np
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QFrame, QGridLayout, QGroupBox, QSplitter)
@@ -216,52 +223,120 @@ class DashboardWidget(QWidget):
     
     def update_with_results(self, results):
         """Update dashboard with scan results"""
-        # Check if results is a DataFrame and handle it properly
-        if isinstance(results, pd.DataFrame):
-            if results.empty:
-                self.placeholder_label.setVisible(True)
-                self.results_widget.setVisible(False)
-                return
-        elif not results:  # For dictionaries or other types
+        # Check for empty or invalid results
+        if results is None:
             self.placeholder_label.setVisible(True)
             self.results_widget.setVisible(False)
             return
             
-        # Rest of the method continues as before...
+        # Handle different data types properly
+        if isinstance(results, pd.DataFrame):
+            # Convert DataFrame to expected dictionary format
+            processed_results = {
+                'total_files': len(results),
+                'total_folders': 0,  # Cannot determine from DataFrame alone
+                'total_size': results['size_bytes'].sum() if 'size_bytes' in results.columns else 0,
+                'avg_path_length': int(results['path_length'].mean()) if 'path_length' in results.columns else 0,
+                'max_path_length': int(results['path_length'].max()) if 'path_length' in results.columns else 0,
+                'total_issues': results['issue_count'].sum() if 'issue_count' in results.columns else 0,
+                'files_df': results
+            }
+        else:
+            # Assume it's already a dictionary
+            processed_results = results
+        
+        # Ensure required keys exist with default values
+        if 'total_files' not in processed_results:
+            processed_results['total_files'] = 0
+        if 'total_folders' not in processed_results:
+            processed_results['total_folders'] = 0
+        if 'total_size' not in processed_results:
+            processed_results['total_size'] = 0
+        if 'avg_path_length' not in processed_results:
+            processed_results['avg_path_length'] = 0
+        if 'max_path_length' not in processed_results:
+            processed_results['max_path_length'] = 0
+        if 'total_issues' not in processed_results:
+            processed_results['total_issues'] = 0
+        
+        # Show results UI
         self.placeholder_label.setVisible(False)
         self.results_widget.setVisible(True)
         
-        # Update summary metrics
-        self._update_metrics(results)
+        # Update metrics and charts
+        self._update_metrics(processed_results)
         
-        # Update charts if available
         if CHARTS_AVAILABLE:
-            self._update_file_types_chart(results.get('file_types', {}))
-            self._update_path_length_chart(results.get('path_length_distribution', {}))
+            # Create file types data if not present
+            if 'file_types' not in processed_results or not processed_results['file_types']:
+                processed_results['file_types'] = self._generate_file_types(processed_results)
+                
+            # Create path length distribution if not present
+            if 'path_length_distribution' not in processed_results or not processed_results['path_length_distribution']:
+                processed_results['path_length_distribution'] = self._generate_path_distribution(processed_results)
+                
+            self._update_file_types_chart(processed_results['file_types'])
+            self._update_path_length_chart(processed_results['path_length_distribution'])
         
         # Update issues list
-        self._update_issues_list(results.get('issues', []))
+        issues = processed_results.get('issues', [])
+        if isinstance(issues, pd.DataFrame):
+            issues = issues.to_dict('records')
+        self._update_issues_list(issues)
+
+    def _generate_file_types(self, results):
+        """Generate file type distribution from available data"""
+        file_types = {}
+        
+        if 'files_df' in results and isinstance(results['files_df'], pd.DataFrame):
+            df = results['files_df']
+            if 'extension' in df.columns:
+                return df['extension'].value_counts().to_dict()
+            elif 'filename' in df.columns:
+                # Extract extensions from filenames
+                extensions = df['filename'].apply(lambda x: os.path.splitext(x)[1].lower() or 'No Extension')
+                return extensions.value_counts().to_dict()
+        
+        # Default data if nothing available
+        return {'No Extension': results.get('total_files', 0) or 1}
+
+    def _generate_path_distribution(self, results):
+        """Generate path length distribution from available data"""
+        distribution = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+        
+        if 'files_df' in results and isinstance(results['files_df'], pd.DataFrame):
+            df = results['files_df']
+            if 'path_length' in df.columns:
+                # Group path lengths into bins
+                for length in df['path_length']:
+                    for bin_val in sorted(distribution.keys()):
+                        if length <= bin_val:
+                            distribution[bin_val] += 1
+                            break
+            elif 'full_path' in df.columns:
+                # Calculate path lengths from full paths
+                for path in df['full_path']:
+                    length = len(path)
+                    for bin_val in sorted(distribution.keys()):
+                        if length <= bin_val:
+                            distribution[bin_val] += 1
+                            break
+        
+        # Ensure at least one bin has data
+        if sum(distribution.values()) == 0:
+            distribution[100] = results.get('total_files', 0) or 1
+        
+        return distribution
 
     def _update_metrics(self, results):
         """Update the summary metrics with results data"""
-        # Extract metrics from results depending on type
-        if isinstance(results, dict):
-            total_files = results.get('total_files', 0)
-            total_folders = results.get('total_folders', 0)
-            total_size = results.get('total_size', 0)
-            avg_path_length = results.get('avg_path_length', 0)
-            max_path_length = results.get('max_path_length', 0)
-            total_issues = results.get('total_issues', 0)
-        elif isinstance(results, pd.DataFrame):
-            total_files = len(results)
-            total_folders = 0  # Can't determine from just the DataFrame
-            total_size = results['size'].sum() if 'size' in results.columns else 0
-            avg_path_length = int(results['path_length'].mean()) if 'path_length' in results.columns else 0
-            max_path_length = int(results['path_length'].max()) if 'path_length' in results.columns else 0
-            total_issues = 0  # Would need more context from original results
-        else:
-            # No valid data
-            return
+        # Extract metrics from results
+        total_files = results.get('total_files', 0)
+        total_folders = results.get('total_folders', 0)
+        total_size = results.get('total_size', 0)
+        avg_path_length = results.get('avg_path_length', 0)
+        max_path_length = results.get('max_path_length', 0)
+        total_issues = results.get('total_issues', 0)
         
         # Update file metrics
         self._update_metric_value(self.total_files_label, str(total_files))
@@ -298,7 +373,7 @@ class DashboardWidget(QWidget):
     
     def _update_file_types_chart(self, file_types):
         """Update the file types pie chart with data"""
-        if not CHARTS_AVAILABLE:
+        if not CHARTS_AVAILABLE or not file_types:
             return
                 
         chart = self.file_types_chart.chart()
@@ -307,18 +382,12 @@ class DashboardWidget(QWidget):
         series = QPieSeries()
         
         # Handle empty or missing data
-        if not file_types:
-            # Create a sample file types distribution based on common extensions
-            file_types = {
-                '.txt': 10,
-                '.pdf': 8,
-                '.docx': 15,
-                '.xlsx': 7,
-                '.jpg': 12,
-                '': 12  # No extension
-            }
+        if not file_types or sum(file_types.values()) == 0:
+            series.append("No Data", 1)
+            chart.addSeries(series)
+            return
         
-        # Calculate totals
+        # Calculate total for percentages
         total = sum(file_types.values())
         if total == 0:
             series.append("No Data", 1)
@@ -335,12 +404,12 @@ class DashboardWidget(QWidget):
         # Add slices for top types
         for ext, count in top_types:
             # Display empty extension as "No Extension"
-            ext_name = ext if ext else "No Extension"
+            ext_name = "No Extension" if not ext else ext
             # Remove leading dot from extension if present
             if ext_name.startswith('.'):
                 ext_name = ext_name[1:].upper()
             percentage = (count / total) * 100
-            slice = series.append(f"{ext_name} ({percentage:.1f}%)", count)
+            slice_ = series.append(f"{ext_name} ({percentage:.1f}%)", count)
         
         # Add "Other" slice if needed
         if other_count > 0:
@@ -352,16 +421,16 @@ class DashboardWidget(QWidget):
     
     def _update_path_length_chart(self, path_lengths):
         """Update the path length bar chart with data"""
-        if not CHARTS_AVAILABLE:
+        if not CHARTS_AVAILABLE or not path_lengths:
             return
                 
         chart = self.path_length_chart.chart()
         chart.removeAllSeries()
         
         # Handle empty or missing data
-        if not path_lengths:
-            # Create sample path length data for visualization
-            path_lengths = {50: 25, 100: 20, 150: 10, 200: 5, 250: 2, 300: 2}
+        if not path_lengths or sum(path_lengths.values()) == 0:
+            # Create dummy data for visualization
+            path_lengths = {50: 0, 100: 1, 150: 0, 200: 0, 250: 0, 300: 0}
         
         # Create series and bar set
         series = QBarSeries()
@@ -389,7 +458,7 @@ class DashboardWidget(QWidget):
             series.attachAxis(axis_x)
             
             axis_y = QValueAxis()
-            max_count = max(values) if values else 10
+            max_count = max(values) if values else 1
             max_count = max(max_count, 1)  # Ensure at least 1 for empty datasets
             axis_y.setRange(0, max_count * 1.1)  # Add 10% padding
             axis_y.setTitleText("Number of Files")
@@ -398,6 +467,18 @@ class DashboardWidget(QWidget):
     
     def _update_issues_list(self, issues):
         """Update the issues list with data"""
+        # Clear existing rows
+        for row in self.issue_rows:
+            row[0].setText("--")
+            row[1].setText("0")
+            row[2].setText("--")
+            row[3].setText("No issues found")
+            row[2].setStyleSheet("")  # Reset style
+        
+        # Check if we have issues to display
+        if not issues or len(issues) == 0:
+            return
+            
         # Convert issues to list format if needed
         if isinstance(issues, pd.DataFrame):
             issues_list = []
@@ -424,25 +505,22 @@ class DashboardWidget(QWidget):
             
             issues = list(grouped_issues.values())
         
-        # Clear existing rows
-        for row in self.issue_rows:
-            row[0].setText("--")
-            row[1].setText("0")
-            row[2].setText("--")
-            row[3].setText("No issues found")
-            row[2].setStyleSheet("")  # Reset style
-        
         # Add new data
         for i, issue in enumerate(issues):
             if i >= len(self.issue_rows):
                 break
                 
             row = self.issue_rows[i]
-            row[0].setText(issue.get('type', '--'))
-            row[1].setText(str(issue.get('count', 0)))
             
+            # Get issue details, handling both dictionary formats
+            issue_type = issue.get('type', issue.get('issue_type', '--'))
+            count = issue.get('count', 1)
             severity = issue.get('severity', '--')
-            row[2].setText(severity)
+            description = issue.get('description', '')
+            
+            row[0].setText(str(issue_type))
+            row[1].setText(str(count))
+            row[2].setText(str(severity))
             
             # Set color based on severity
             if severity == 'Critical':
@@ -450,4 +528,4 @@ class DashboardWidget(QWidget):
             elif severity == 'Warning':
                 row[2].setStyleSheet("color: orange; font-weight: bold;")
             
-            row[3].setText(issue.get('description', ''))
+            row[3].setText(str(description))

@@ -90,92 +90,124 @@ class DataProcessor:
         
     def _scan_completed(self, results, callback=None):
         """
-        Handle scan completion
+        Handle scan completion and prepare results for UI components
         
         Args:
             results (dict): Scan results
             callback (function): Callback to invoke after processing
         """
-        # Convert results to pandas DataFrame (if needed)
+        # Convert results to pandas DataFrame if needed
         self._process_scan_results(results)
         
         # Store the full dataset in the analysis results
         self.analysis_results['all_files'] = self.scan_data
         
-        # Create a complete results dictionary that contains both the original data
-        # and the processed data needed by UI components
+        # Create a complete results dictionary with all required keys
         complete_results = {}
         
-        # First add raw scan data
+        # First add raw scan data if it's a dictionary
         if isinstance(results, dict):
             complete_results.update(results)
         
-        # Add processed dataframe data
+        # Add core metrics that UI components expect
         complete_results['scan_data'] = self.scan_data  
-        complete_results['files_df'] = self.scan_data    # Alternative name some components might expect
+        complete_results['files_df'] = self.scan_data
         
-        # Make sure file_types is present and populated
-        if 'file_types' not in complete_results or not complete_results['file_types']:
-            # Create file types mapping from scan_data
-            file_types = {}
-            for _, row in self.scan_data.iterrows():
-                ext = ''
-                if 'extension' in row:
-                    ext = row['extension']
-                elif 'filename' in row:
-                    ext = os.path.splitext(row['filename'])[1].lower()
-                elif 'name' in row:
-                    ext = os.path.splitext(row['name'])[1].lower()
-                    
-                if ext not in file_types:
-                    file_types[ext] = 0
-                file_types[ext] += 1
-            complete_results['file_types'] = file_types
-        
-        # Make sure path_length_distribution is present and populated
-        if 'path_length_distribution' not in complete_results or not complete_results['path_length_distribution']:
-            # Create path length distribution
-            path_lengths = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
-            for _, row in self.scan_data.iterrows():
-                length = 0
-                if 'path_length' in row:
-                    length = row['path_length']
-                elif 'path' in row:
-                    length = len(row['path'])
-                elif 'full_path' in row:
-                    length = len(row['full_path'])
-                    
-                for bin_val in sorted(path_lengths.keys()):
-                    if length <= bin_val:
-                        path_lengths[bin_val] += 1
-                        break
-            complete_results['path_length_distribution'] = path_lengths
-        
-        # Ensure we have counts for metrics
+        # Make sure all required metrics are present with proper defaults
         if 'total_files' not in complete_results:
-            complete_results['total_files'] = len(self.scan_data)
+            complete_results['total_files'] = len(self.scan_data) if self.scan_data is not None else 0
+            
         if 'total_folders' not in complete_results:
-            # Cannot determine easily from DataFrame, set placeholder
             complete_results['total_folders'] = results.get('total_folders', 0) if isinstance(results, dict) else 0
+            
         if 'total_size' not in complete_results:
-            complete_results['total_size'] = self.scan_data['size'].sum() if 'size' in self.scan_data.columns else 0
+            if self.scan_data is not None:
+                if 'size_bytes' in self.scan_data.columns:
+                    complete_results['total_size'] = self.scan_data['size_bytes'].sum()
+                elif 'size' in self.scan_data.columns:
+                    complete_results['total_size'] = self.scan_data['size'].sum()
+                else:
+                    complete_results['total_size'] = 0
+            else:
+                complete_results['total_size'] = 0
+                
         if 'avg_path_length' not in complete_results:
-            if 'path_length' in self.scan_data.columns:
+            if self.scan_data is not None and 'path_length' in self.scan_data.columns:
                 complete_results['avg_path_length'] = int(self.scan_data['path_length'].mean())
             else:
                 complete_results['avg_path_length'] = 0
+                
         if 'max_path_length' not in complete_results:
-            if 'path_length' in self.scan_data.columns:
+            if self.scan_data is not None and 'path_length' in self.scan_data.columns:
                 complete_results['max_path_length'] = int(self.scan_data['path_length'].max())
             else:
                 complete_results['max_path_length'] = 0
+                
         if 'total_issues' not in complete_results:
-            complete_results['total_issues'] = self.scan_data['issue_count'].sum() if 'issue_count' in self.scan_data.columns else 0
+            if self.scan_data is not None and 'issue_count' in self.scan_data.columns:
+                complete_results['total_issues'] = self.scan_data['issue_count'].sum()
+            elif isinstance(results, dict) and 'issues' in results:
+                complete_results['total_issues'] = len(results['issues'])
+            else:
+                complete_results['total_issues'] = 0
+        
+        # Generate file types distribution if not present
+        if 'file_types' not in complete_results or not complete_results.get('file_types'):
+            file_types = {}
+            if self.scan_data is not None:
+                for _, row in self.scan_data.iterrows():
+                    ext = ''
+                    if 'extension' in row:
+                        ext = row['extension']
+                    elif 'filename' in row:
+                        ext = os.path.splitext(row['filename'])[1].lower()
+                    elif 'name' in row:
+                        ext = os.path.splitext(row['name'])[1].lower()
+                    
+                    if ext not in file_types:
+                        file_types[ext] = 0
+                    file_types[ext] += 1
+            complete_results['file_types'] = file_types
+        
+        # Generate path length distribution if not present
+        if 'path_length_distribution' not in complete_results or not complete_results.get('path_length_distribution'):
+            distribution = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+            if self.scan_data is not None:
+                path_length_col = None
+                for col in ['path_length', 'full_path', 'path']:
+                    if col in self.scan_data.columns:
+                        path_length_col = col
+                        break
+                        
+                if path_length_col:
+                    for _, row in self.scan_data.iterrows():
+                        length = row[path_length_col]
+                        if path_length_col != 'path_length':
+                            length = len(length)
+                        
+                        for bin_val in sorted(distribution.keys()):
+                            if length <= bin_val:
+                                distribution[bin_val] += 1
+                                break
+                                
+            complete_results['path_length_distribution'] = distribution
+        
+        # Ensure issues are properly formatted
+        if 'issues' not in complete_results:
+            if self.analysis_results.get('path_issues') is not None:
+                issues = self.analysis_results['path_issues'].to_dict('records')
+                if 'name_issues' in self.analysis_results:
+                    issues.extend(self.analysis_results['name_issues'].to_dict('records'))
+                if 'duplicates' in self.analysis_results:
+                    issues.extend(self.analysis_results['duplicates'].to_dict('records'))
+                complete_results['issues'] = issues
+            else:
+                complete_results['issues'] = []
         
         # Invoke the callback with the fully populated results
         if callback:
             callback(complete_results)
-    
+
     def _process_scan_results(self, results):
         """
         Process raw scan results into pandas DataFrame
@@ -183,33 +215,60 @@ class DataProcessor:
         Args:
             results (dict): Raw scan results
         """
-        # This would collect all files into a flat DataFrame
-        file_list = []
-        
-        # Extract files from file_structure
-        for dir_path, dir_data in results.get('file_structure', {}).items():
-            # Add files
-            for file_info in dir_data.get('files', []):
-                file_list.append({
-                    'path': file_info.get('path', ''),
-                    'name': file_info.get('name', ''),
-                    'size': file_info.get('size', 0),
-                    'extension': file_info.get('extension', ''),
-                    'is_folder': False
-                })
+        # Check if results is already a DataFrame
+        if isinstance(results, pd.DataFrame):
+            self.scan_data = results
+            return
             
-            # Add folders
-            for folder_info in dir_data.get('folders', []):
-                file_list.append({
-                    'path': folder_info.get('path', ''),
-                    'name': folder_info.get('name', ''),
-                    'size': 0,
-                    'extension': '',
-                    'is_folder': True
-                })
+        # Handle various possible formats of results
+        if isinstance(results, dict):
+            # Check if results have a files array
+            if 'files' in results and isinstance(results['files'], list):
+                self.scan_data = pd.DataFrame(results['files'])
+                return
+                
+            # Check if results have a files_df DataFrame
+            if 'files_df' in results and isinstance(results['files_df'], pd.DataFrame):
+                self.scan_data = results['files_df']
+                return
+                
+            # Check if results have a scan_data DataFrame
+            if 'scan_data' in results and isinstance(results['scan_data'], pd.DataFrame):
+                self.scan_data = results['scan_data']
+                return
+                
+            # Extract files from file_structure if present
+            if 'file_structure' in results and isinstance(results['file_structure'], dict):
+                file_list = []
+                
+                # Extract files from file_structure
+                for dir_path, dir_data in results['file_structure'].items():
+                    # Add files
+                    for file_info in dir_data.get('files', []):
+                        file_list.append({
+                            'path': file_info.get('path', ''),
+                            'name': file_info.get('name', ''),
+                            'size': file_info.get('size', 0),
+                            'extension': file_info.get('extension', ''),
+                            'is_folder': False
+                        })
+                    
+                    # Add folders
+                    for folder_info in dir_data.get('folders', []):
+                        file_list.append({
+                            'path': folder_info.get('path', ''),
+                            'name': folder_info.get('name', ''),
+                            'size': 0,
+                            'extension': '',
+                            'is_folder': True
+                        })
+                
+                # Create DataFrame
+                self.scan_data = pd.DataFrame(file_list)
+                return
         
-        # Create DataFrame
-        self.scan_data = pd.DataFrame(file_list)
+        # If we get here, create an empty DataFrame with expected columns
+        self.scan_data = pd.DataFrame(columns=['path', 'name', 'size', 'extension', 'is_folder'])
         
     def analyze_data(self, feature_flags=None, callbacks=None):
         """
