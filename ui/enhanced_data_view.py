@@ -74,9 +74,24 @@ class EnhancedDataView(QWidget):
         Set the data to be displayed in the table view.
         
         Args:
-            data_frame (pandas.DataFrame): The data to display
+            data_frame (pandas.DataFrame or dict): The data to display
         """
-        if data_frame is None or data_frame.empty:
+        # If input is a dictionary, extract the DataFrame
+        if isinstance(data_frame, dict):
+            if 'scan_data' in data_frame:
+                data_frame = data_frame['scan_data']
+            elif 'files_df' in data_frame:
+                data_frame = data_frame['files_df']
+            else:
+                logger.warning("Input is a dictionary but doesn't contain expected DataFrame keys")
+                return
+        
+        # Now check if it's a DataFrame and if it's empty
+        if not isinstance(data_frame, pd.DataFrame):
+            logger.warning("Input is not a DataFrame after conversion")
+            return
+            
+        if data_frame.empty:
             logger.warning("Attempted to set empty data to enhanced view")
             return
             

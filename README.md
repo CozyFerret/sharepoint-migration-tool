@@ -1,11 +1,16 @@
-# SharePoint Migration Tool
+# SharePoint Migration Tool - Enhanced Edition
 
 A Python-based desktop application for cleaning and preparing file systems for SharePoint migration. This tool helps identify and fix common issues encountered during SharePoint migrations, ensuring a smooth transition to SharePoint Online or on-premises environments.
 
 ## Key Features
 
 ### Core Functionality
-- **Non-Destructive Operation**: All changes are made to copies of original files, preserving your source data
+- **Operational Mode Options**:
+  - **Non-Destructive Operation**: Makes changes to copies of original files, preserving your source data
+  - **Destructive Operation**: Modifies files in-place for more direct workflows when needed
+- **Destination Options**:
+  - **Local Saving**: Save cleaned files to a local directory
+  - **Direct SharePoint Upload**: Upload directly to SharePoint after cleaning
 - **In-Memory Processing**: No permanent data storage for enhanced security
 - **Comprehensive Analysis**:
   - **SharePoint Naming Compliance**: Detects and fixes illegal characters and reserved names
@@ -13,7 +18,7 @@ A Python-based desktop application for cleaning and preparing file systems for S
   - **Duplicate File Detection**: Finds exact and similar duplicates using hash comparison
   - **PII Detection**: PLACEHOLDER ONLY - Framework exists but no actual detection functionality yet
 
-### Enhanced Data View (New)
+### Enhanced Data View
 - **Interactive Data Grid**:
   - **Sorting**: Click any column header to sort data
   - **Filtering**: Filter by specific column values
@@ -22,16 +27,20 @@ A Python-based desktop application for cleaning and preparing file systems for S
   - Export analyzed data as CSV, Excel, JSON, or text files
   - Export only filtered/selected data
 
-### Flexible Cleanup Options
-- **Manual Mode**: Non-destructively copies cleaned data to a new folder
-- **Automatic Mode (Enhanced)**: Cleans data and uploads directly to SharePoint
-  - **Authentication**: Support for modern username/password and app-only authentication
-  - **Document Library Selection**: Browse and select target document libraries
-  - **Automatic Folder Creation**: Creates folder structure in SharePoint matching source
+### Advanced Settings
+- **Operation Mode Settings**:
+  - Choose between destructive and non-destructive operations
+  - Toggle preserving original timestamps during cleaning
+  - Option to ignore hidden files during scanning
+- **Destination Settings**:
+  - Configure whether to save locally or upload to SharePoint
+  - Persistent settings between application runs
+  - Visual warnings for potentially destructive operations
 
-### Visual Analysis
-- **Dashboard with insights** about your file structure and issues
-- **Detailed file reports** with specific issue identification
+### SharePoint Integration
+- **Authentication**: Support for modern username/password and app-only authentication
+- **Document Library Selection**: Browse and select target document libraries
+- **Automatic Folder Creation**: Creates folder structure in SharePoint matching source
 
 ## Requirements
 
@@ -70,7 +79,7 @@ A Python-based desktop application for cleaning and preparing file systems for S
 
 4. **Launch the application**:
    ```
-   python main.py
+   python sp_migration_tool.py
    ```
 
 ## Usage Guide
@@ -78,38 +87,41 @@ A Python-based desktop application for cleaning and preparing file systems for S
 ### Basic Workflow
 
 1. **Select the folder** you want to analyze using the "Browse" button
-2. **Configure which features** you want to use (Name Validation, Path Length, etc.)
-3. **Click "Start Scan"** to begin analysis
-4. **View results** in the Analysis tab with the enhanced data view
+2. **Click "Start Scan"** to begin analysis
+3. **View results** in the Analysis tab with the enhanced data view
    - Use the search box to find specific files
    - Filter by column values to focus on specific issues
    - Sort by clicking column headers
-5. **Export reports** as needed using the "Export" button
-6. **Clean and prepare data** using either:
-   - **Manual Mode**: Select a target folder for the cleaned files
-   - **Automatic Mode**: Connect to SharePoint and upload directly
+4. **Configure settings** in the Settings tab
+   - Choose between destructive and non-destructive operations
+   - Select whether to save locally or upload to SharePoint
+5. **Clean and prepare data** in the Migration tab
+   - Configure cleaning options (Fix names, Fix paths, etc.)
+   - Select destination (local folder or SharePoint library)
+   - Click "Start Migration" to begin the cleaning process
 
-### Using Enhanced Data View
+### Operational Modes
 
-1. **Search**: Enter text in the search box to find matching files across all columns
-2. **Filter**: Select a column and value from the dropdown menus
-3. **Sort**: Click any column header to sort ascending/descending
-4. **Export**: Click the Export button and select your preferred format
-   - CSV: For spreadsheet applications
-   - Excel: For Microsoft Excel
-   - JSON: For programmatic access
-   - Text: For plain text representation
+1. **Non-Destructive Mode** (Default):
+   - Creates copies of files with issues fixed
+   - Original files remain untouched
+   - Safer option for preserving original data
 
-### SharePoint Integration
+2. **Destructive Mode**:
+   - Modifies files in-place
+   - No extra disk space required for copies
+   - Use with caution and make backups first
 
-1. **Select "Clean and Upload to SharePoint"** mode in the Migration tab
-2. **Click "Sign In"** and enter your SharePoint credentials:
-   - **Site URL**: Your SharePoint site URL
-   - **Authentication Method**: Choose username/password or app-only
-3. **Select target document library** from the dropdown
-4. **Configure cleaning options** as needed
-5. **Click "Start Migration"** to begin the process
-6. **Monitor progress** in the status bar
+### Destination Options
+
+1. **Save to Local Directory**:
+   - Cleaned files are saved to a local folder
+   - Choose any accessible directory as the target
+
+2. **Upload to SharePoint**:
+   - Cleaned files are uploaded directly to SharePoint
+   - Requires SharePoint authentication
+   - Select target document library from the dropdown
 
 ## Security Features
 
@@ -118,54 +130,17 @@ A Python-based desktop application for cleaning and preparing file systems for S
 - **PII awareness**: Framework exists but actual PII detection is a placeholder for future development
 - **Secure clipboard handling**: Clipboard is cleared after copy operations
 
-## Project Structure
-
-```
-sharepoint_migration_tool/
-├── core/                # Core functionality
-│   ├── scanner.py       # File system scanning
-│   ├── data_cleaner.py  # Cleaning operations
-│   ├── data_processor.py # Process orchestration
-│   ├── analyzers/       # Analysis modules
-│   │   ├── name_validator.py
-│   │   ├── path_analyzer.py
-│   │   ├── duplicate_finder.py
-│   │   └── pii_detector.py # PLACEHOLDER - No actual detection yet
-│   └── fixers/          # Issue correction modules
-│       ├── path_shortener.py
-│       ├── name_fixer.py
-│       └── deduplicator.py
-├── infrastructure/
-│   └── sharepoint.py    # SharePoint connectivity
-├── ui/                  # User interface components
-│   ├── enhanced_data_view.py  # New interactive data view
-│   └── migration_ui.py        # Main migration interface
-├── utils/               # Utility functions
-├── resources/           # Application resources
-│   ├── icons/
-│   └── styles/
-├── main.py              # Application entry point
-└── README.md            # This file
-```
-
 ## Implementation Status
 
 - ✅ SharePoint naming compliance validation and fixing
 - ✅ Path length detection and shortening
 - ✅ Duplicate file detection and management
-- ✅ Manual cleaning mode (copy to new location)
-- ✅ Automatic SharePoint upload mode
+- ✅ Destructive/Non-destructive operation modes
+- ✅ Local saving and direct SharePoint upload options
 - ✅ Enhanced data view with sorting, filtering, and searching
 - ✅ Multi-format export functionality
+- ✅ Advanced settings management
 - ❌ PII Detection (placeholder only - framework exists but no actual detection yet)
-
-## Extensibility
-
-The modular design makes it easy to extend the functionality:
-
-- For new analyzers, add a module in `core/analyzers/`
-- For new fixers, add a module in `core/fixers/`
-- Update the UI components in `ui/` to expose the new functionality
 
 ## Future Enhancements
 
@@ -191,4 +166,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Disclaimer
 
-This tool is provided as-is without warranty. Always test thoroughly before using in production environments.
+This tool is provided as-is without warranty. Always test thoroughly before using in production environments. The destructive mode modifies files in-place, so always make backups before using this mode.

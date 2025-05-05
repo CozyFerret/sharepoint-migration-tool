@@ -178,7 +178,10 @@ class FileAnalysisTab(QWidget):
         Args:
             results (dict): Scan results dictionary
         """
-        if not results:
+        if isinstance(results, pd.DataFrame):
+            if results.empty:
+                return
+        elif not results:
             return
         
         # Convert results to DataFrames if needed

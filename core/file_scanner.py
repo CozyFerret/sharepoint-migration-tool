@@ -233,6 +233,12 @@ class FileSystemScanner:
             # Get file info
             file_info = self._get_file_info(file_path, root_path)
             
+            # Explicitly add extension and path_length if missing
+            if 'extension' not in file_info:
+                file_info['extension'] = os.path.splitext(file_path)[1].lower()
+            if 'path_length' not in file_info:
+                file_info['path_length'] = len(file_path)
+            
             # Check for issues
             issues = self._check_for_issues(file_path, file_info)
             
@@ -558,23 +564,55 @@ class FileSystemScanner:
         """Process raw scan results to calculate summary statistics."""
         if not self.scan_results['files']:
             return
-            
+                
         # Convert to DataFrame for easier processing
         files_df = pd.DataFrame(self.scan_results['files'])
         
-        # Calculate file type distribution
+        # Calculate file type distribution - make sure this happens
         if 'extension' in files_df.columns:
             self.scan_results['file_types'] = files_df['extension'].value_counts().to_dict()
+        else:
+            # If no extension column, create a file type distribution from filenames
+            self.scan_results['file_types'] = {}
+            for file_info in self.scan_results['files']:
+                # Get extension from filename
+                filename = file_info.get('filename', '')
+                ext = os.path.splitext(filename)[1].lower() or 'no extension'
+                if ext not in self.scan_results['file_types']:
+                    self.scan_results['file_types'][ext] = 0
+                self.scan_results['file_types'][ext] += 1
         
-        # Calculate path length distribution
+        # Calculate path length distribution - ensure this works
         if 'path_length' in files_df.columns:
-            for threshold in self.scan_results['path_length_distribution'].keys():
-                self.scan_results['path_length_distribution'][threshold] = \
-                    int(files_df[files_df['path_length'] <= threshold].shape[0])
-            
-            # Calculate average and max path length
+            # Get actual distribution
+            path_lengths = files_df['path_length'].value_counts().to_dict()
+            # Create bins for the visualization
+            bins = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+            for length, count in path_lengths.items():
+                for bin_val in sorted(bins.keys()):
+                    if length <= bin_val:
+                        bins[bin_val] += count
+                        break
+            self.scan_results['path_length_distribution'] = bins
+        else:
+            # If no path_length column, estimate from full_path
+            self.scan_results['path_length_distribution'] = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+            if 'full_path' in files_df.columns:
+                for _, row in files_df.iterrows():
+                    path_length = len(row['full_path'])
+                    for bin_val in sorted(self.scan_results['path_length_distribution'].keys()):
+                        if path_length <= bin_val:
+                            self.scan_results['path_length_distribution'][bin_val] += 1
+                            break
+        
+        # Calculate average and max path length
+        if 'path_length' in files_df.columns:
             self.scan_results['avg_path_length'] = int(files_df['path_length'].mean())
             self.scan_results['max_path_length'] = int(files_df['path_length'].max())
+        elif 'full_path' in files_df.columns:
+            path_lengths = files_df['full_path'].str.len()
+            self.scan_results['avg_path_length'] = int(path_lengths.mean())
+            self.scan_results['max_path_length'] = int(path_lengths.max())
         
         # Convert files list to DataFrame for the UI
         self.scan_results['files_df'] = files_df
@@ -582,12 +620,6 @@ class FileSystemScanner:
         # Convert issues list to DataFrame for the UI
         if self.scan_results['issues']:
             self.scan_results['issues_df'] = pd.DataFrame(self.scan_results['issues'])
-            
-            # Group issues by type for summary
-            if 'issue_type' in self.scan_results['issues_df'].columns:
-                issue_summary = self.scan_results['issues_df']['issue_type'].value_counts().reset_index()
-                issue_summary.columns = ['type', 'count']
-                self.scan_results['issue_summary'] = issue_summary.to_dict('records')
     
     def get_results_as_dataframes(self):
         """

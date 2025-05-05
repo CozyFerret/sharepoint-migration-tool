@@ -1,3 +1,9 @@
+"""
+Main Window for SharePoint Migration Tool
+
+This module provides the main application window with integrated settings.
+"""
+
 import sys
 import os
 import logging
@@ -10,260 +16,27 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QFont, QIcon
 
-# Import Dashboard widget
+# Import UI components
 from ui.dashboard import DashboardWidget
-
-# Import Enhanced Data View
 from ui.enhanced_data_view import EnhancedDataView
-
-# Import the new File Analysis Tab
 from ui.file_analysis_tab import FileAnalysisTab
+from ui.migration_tab import MigrationTab
+from ui.settings_widget import SettingsWidget
 
-# Simple placeholder for DataProcessor
-class SimpleDataProcessor:
-    """Simple placeholder for DataProcessor to get the UI working"""
-    
-    def __init__(self):
-        self.scan_data = None
-    
-    def start_scan(self, path, callbacks=None):
-        """Simple placeholder for scanning"""
-        print(f"Simulating scan of {path}")
-        
-        # Simulate scanning
-        import time
-        import random
-        import os
-        
-        # Generate mock scan results
-        results = {
-            'total_files': random.randint(100, 500),
-            'total_folders': random.randint(20, 50),
-            'total_size': random.randint(1000000, 100000000),
-            'total_issues': random.randint(10, 50),
-            'file_types': {
-                '.docx': random.randint(10, 50),
-                '.xlsx': random.randint(10, 50),
-                '.pdf': random.randint(10, 50),
-                '.jpg': random.randint(10, 50),
-                '.png': random.randint(10, 50),
-                '.txt': random.randint(10, 50),
-            },
-            'path_length_distribution': {
-                50: random.randint(10, 50),
-                100: random.randint(10, 50),
-                150: random.randint(5, 20),
-                200: random.randint(1, 10),
-                250: random.randint(0, 5),
-                300: random.randint(0, 2),
-            },
-            'avg_path_length': random.randint(80, 150),
-            'max_path_length': random.randint(200, 300),
-            'issues': [
-                {
-                    'type': 'Path Too Long',
-                    'count': random.randint(5, 20),
-                    'description': 'Files with paths exceeding SharePoint limits',
-                    'severity': 'Critical'
-                },
-                {
-                    'type': 'Illegal Characters',
-                    'count': random.randint(5, 20),
-                    'description': 'Files with illegal characters in their names',
-                    'severity': 'Critical'
-                },
-                {
-                    'type': 'Duplicate Files',
-                    'count': random.randint(5, 20),
-                    'description': 'Files with identical content',
-                    'severity': 'Warning'
-                }
-            ]
-        }
-        
-        # If callbacks are provided, simulate progress and completion
-        if callbacks:
-            # Simulate progress updates
-            if 'progress' in callbacks:
-                for i in range(0, 101, 5):
-                    callbacks['progress'](i, 100)
-                    # Add slight delay to simulate work
-                    time.sleep(0.1)
-            
-            # Simulate completion
-            if 'scan_completed' in callbacks:
-                callbacks['scan_completed'](results)
+# Import core components
+from core.data_processor import DataProcessor
 
-
-class AnalysisTab(QWidget):
-    """Tab for data analysis and enhanced viewing."""
-    
-    def __init__(self, parent=None):
-        super(AnalysisTab, self).__init__(parent)
-        
-        # Main layout
-        self.layout = QVBoxLayout(self)
-        
-        # Source selection
-        source_layout = QHBoxLayout()
-        source_label = QLabel("Source Directory:")
-        self.source_edit = QLineEdit()
-        self.source_edit.setReadOnly(True)
-        
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.select_source)
-        
-        scan_btn = QPushButton("Start Scan")
-        scan_btn.clicked.connect(self.start_scan)
-        
-        source_layout.addWidget(source_label)
-        source_layout.addWidget(self.source_edit)
-        source_layout.addWidget(browse_btn)
-        source_layout.addWidget(scan_btn)
-        self.layout.addLayout(source_layout)
-        
-        # Add enhanced data view
-        self.enhanced_view = EnhancedDataView()
-        self.layout.addWidget(self.enhanced_view)
-        
-        # Status bar for progress updates
-        status_layout = QHBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.status_label = QLabel("Ready")
-        
-        status_layout.addWidget(self.progress_bar)
-        status_layout.addWidget(self.status_label)
-        self.layout.addLayout(status_layout)
-        
-    def select_source(self):
-        """Select source directory for analysis"""
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Source Directory", "", QFileDialog.ShowDirsOnly
-        )
-        
-        if folder:
-            self.source_edit.setText(folder)
-            
-    def start_scan(self):
-        """Start scanning the selected directory"""
-        source_dir = self.source_edit.text()
-        if not source_dir or source_dir == "Not selected":
-            QMessageBox.warning(self, "Error", "Please select a valid source directory.")
-            return
-            
-        # Show progress
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(True)
-        self.status_label.setText("Scanning...")
-        
-        # Find the main window to access data processor
-        main_window = self.window()
-        if hasattr(main_window, 'data_processor'):
-            # Define callbacks
-            def progress_callback(current, total):
-                if total > 0:
-                    percentage = int((current / total) * 100)
-                    self.progress_bar.setValue(percentage)
-            
-            def completion_callback(results):
-                self.progress_bar.setVisible(False)
-                self.status_label.setText("Scan completed")
-                
-                # Update the enhanced data view with results
-                self.update_data_view(results)
-            
-            # Start scan
-            try:
-                main_window.data_processor.start_scan(
-                    source_dir,
-                    callbacks={
-                        'progress': progress_callback,
-                        'scan_completed': completion_callback
-                    }
-                )
-            except Exception as e:
-                self.progress_bar.setVisible(False)
-                self.status_label.setText("Scan failed")
-                QMessageBox.critical(self, "Error", f"Failed to start scan: {str(e)}")
-    
-    def update_data_view(self, results):
-        """Update the enhanced data view with scan results"""
-        if not results:
-            return
-            
-        try:
-            # Convert the results dictionary to a DataFrame
-            if 'issues' in results and isinstance(results['issues'], list) and results['issues']:
-                # If we have detailed issues, use those
-                df = pd.DataFrame(results['issues'])
-            else:
-                # Otherwise create a simple summary
-                summary_data = []
-                for key, value in results.items():
-                    if isinstance(value, (int, float, str, bool)):
-                        summary_data.append({'Metric': key, 'Value': value})
-                
-                df = pd.DataFrame(summary_data)
-            
-            # Update the enhanced data view
-            self.enhanced_view.set_data(df)
-        except Exception as e:
-            logging.error(f"Error updating enhanced data view: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to update data view: {str(e)}")
-
-
-# Simple placeholder for the Migration Tab
-class MigrationTab(QWidget):
-    """Tab for migration options."""
-    
-    def __init__(self, parent=None):
-        super(MigrationTab, self).__init__(parent)
-        
-        # Simple placeholder layout
-        layout = QVBoxLayout(self)
-        
-        # Source selection
-        source_layout = QHBoxLayout()
-        source_label = QLabel("Source Directory:")
-        self.source_edit = QLineEdit()
-        self.source_edit.setReadOnly(True)
-        
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.select_source)
-        
-        source_layout.addWidget(source_label)
-        source_layout.addWidget(self.source_edit)
-        source_layout.addWidget(browse_btn)
-        layout.addLayout(source_layout)
-        
-        # Add placeholder message
-        message = QLabel("Migration functionality will be implemented in a future version.")
-        message.setAlignment(Qt.AlignCenter)
-        font = QFont()
-        font.setItalic(True)
-        message.setFont(font)
-        layout.addWidget(message)
-        
-    def select_source(self):
-        """Select source directory"""
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Source Directory", "", QFileDialog.ShowDirsOnly
-        )
-        
-        if folder:
-            self.source_edit.setText(folder)
-
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
-    """Main window for SharePoint Data Migration Cleanup Tool."""
+    """Main window for SharePoint Data Migration Cleanup Tool with integrated settings."""
     
     def __init__(self):
         super().__init__()
         
         # Set window properties
         self.setWindowTitle("SharePoint Migration Tool")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(1000, 700)
         
         # Create central widget
         self.central_widget = QWidget()
@@ -272,20 +45,8 @@ class MainWindow(QMainWindow):
         # Create main layout
         self.layout = QVBoxLayout(self.central_widget)
         
-        # Initialize data processor - use simple version for now to avoid errors
-        self.data_processor = SimpleDataProcessor()
-        
-        # Try to load the real DataProcessor, but handle any errors
-        try:
-            # Try importing the real DataProcessor
-            from core.data_processor import DataProcessor
-            # Check if it can be instantiated without errors
-            test_instance = DataProcessor()
-            # If successful, use it instead of the placeholder
-            self.data_processor = test_instance
-            logging.info("Using real DataProcessor")
-        except Exception as e:
-            logging.warning(f"Could not initialize real DataProcessor, using placeholder: {str(e)}")
+        # Initialize data processor
+        self.data_processor = DataProcessor()
         
         # Create menus
         self.create_menus()
@@ -322,6 +83,12 @@ class MainWindow(QMainWindow):
         title_font.setBold(True)
         title.setFont(title_font)
         
+        # Add version info
+        version_label = QLabel("v1.2.0")
+        version_font = QFont()
+        version_font.setItalic(True)
+        version_label.setFont(version_font)
+        
         # Add source selection
         source_label = QLabel("Source:")
         self.source_path = QLabel("Not selected")
@@ -335,6 +102,7 @@ class MainWindow(QMainWindow):
         
         # Add widgets to layout
         header_layout.addWidget(title)
+        header_layout.addWidget(version_label)
         header_layout.addStretch()
         header_layout.addWidget(source_label)
         header_layout.addWidget(self.source_path)
@@ -343,9 +111,9 @@ class MainWindow(QMainWindow):
         
         # Add to main layout
         self.layout.addLayout(header_layout)
-    
+        
     def setup_tabs(self):
-        """Set up the tab widget with various tabs"""
+        """Set up the tab widget with various tabs including settings"""
         self.tabs = QTabWidget()
         
         # Create and add the Dashboard tab
@@ -353,20 +121,31 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
         
         # Add Analysis tab with enhanced data view
-        self.analysis_tab = AnalysisTab()
+        self.analysis_tab = QWidget()
+        analysis_layout = QVBoxLayout(self.analysis_tab)
+        self.enhanced_view = EnhancedDataView()
+        analysis_layout.addWidget(self.enhanced_view)
         self.tabs.addTab(self.analysis_tab, "Analysis")
         
-        # Add File Analysis tab (NEW)
+        # Add File Analysis tab
         self.file_analysis_tab = FileAnalysisTab()
         self.tabs.addTab(self.file_analysis_tab, "File Analysis")
         
-        # Add Migration tab (placeholder)
+        # Add Migration tab with updated version
         self.migration_tab = MigrationTab()
         self.tabs.addTab(self.migration_tab, "Migration")
         
+        # Add Settings tab
+        self.settings_tab = QWidget()
+        settings_layout = QVBoxLayout(self.settings_tab)
+        self.settings_widget = SettingsWidget()
+        self.settings_widget.settings_changed.connect(self.on_settings_changed)
+        settings_layout.addWidget(self.settings_widget)
+        self.tabs.addTab(self.settings_tab, "Settings")
+        
         # Add tabs to main layout
         self.layout.addWidget(self.tabs, 1)  # 1 = stretch factor
-    
+        
     def create_menus(self):
         """Create application menus"""
         menu_bar = self.menuBar()
@@ -398,14 +177,13 @@ class MainWindow(QMainWindow):
         scan_action.triggered.connect(self.start_scan)
         tools_menu.addAction(scan_action)
         
-        analyze_action = QAction("&Analyze Data", self)
-        analyze_action.triggered.connect(self.go_to_analysis)
-        tools_menu.addAction(analyze_action)
+        clean_action = QAction("&Clean Files", self)
+        clean_action.triggered.connect(self.go_to_migration)
+        tools_menu.addAction(clean_action)
         
-        # Add file analysis action (NEW)
-        file_analysis_action = QAction("&File Analysis", self)
-        file_analysis_action.triggered.connect(self.go_to_file_analysis)
-        tools_menu.addAction(file_analysis_action)
+        settings_action = QAction("&Settings", self)
+        settings_action.triggered.connect(self.go_to_settings)
+        tools_menu.addAction(settings_action)
         
         # Help menu
         help_menu = menu_bar.addMenu("&Help")
@@ -428,20 +206,17 @@ class MainWindow(QMainWindow):
             self.scan_button.setEnabled(True)
             
             # Update source in other tabs
-            if hasattr(self.analysis_tab, 'source_edit') and hasattr(self.analysis_tab.source_edit, 'setText'):
-                self.analysis_tab.source_edit.setText(folder)
-            
-            if hasattr(self.migration_tab, 'source_edit') and hasattr(self.migration_tab.source_edit, 'setText'):
-                self.migration_tab.source_edit.setText(folder)
-            
-            # Update source in File Analysis tab (NEW)
-            if hasattr(self.file_analysis_tab, 'source_edit') and hasattr(self.file_analysis_tab.source_edit, 'setText'):
+            if hasattr(self.file_analysis_tab, 'source_edit'):
                 self.file_analysis_tab.source_edit.setText(folder)
+            
+            if hasattr(self.migration_tab, 'source_edit'):
+                self.migration_tab.source_edit.setText(folder)
     
     def start_scan(self):
         """Start scanning process"""
         source = self.source_path.text()
         if source == "Not selected":
+            QMessageBox.warning(self, "Error", "Please select a source directory first.")
             return
         
         # Update UI
@@ -462,19 +237,74 @@ class MainWindow(QMainWindow):
             self.scan_button.setEnabled(True)
             self.statusBar.showMessage("Scan completed")
             
-            # Update dashboard with results
-            self.dashboard_tab.update_with_results(results)
+            # Processing results to ensure consistent format for all UI components
+            try:
+                # Convert results to dictionary if it's a DataFrame
+                if isinstance(results, pd.DataFrame):
+                    processed_results = {
+                        'total_files': len(results),
+                        'total_folders': 0,  # Can't determine from just the DataFrame
+                        'total_size': results['size'].sum() if 'size' in results.columns else 0,
+                        'scan_data': results,
+                        'files_df': results  # Add this for components that expect this key
+                    }
+                    
+                    # Extract file types from extensions
+                    if 'extension' in results.columns:
+                        processed_results['file_types'] = results['extension'].value_counts().to_dict()
+                    else:
+                        # Create file types from filenames
+                        file_types = {}
+                        for _, row in results.iterrows():
+                            filename = row.get('filename', '') or row.get('name', '')
+                            ext = os.path.splitext(filename)[1].lower() or ''
+                            if ext not in file_types:
+                                file_types[ext] = 0
+                            file_types[ext] += 1
+                        processed_results['file_types'] = file_types
+                    
+                    # Create path length distribution
+                    if 'path_length' in results.columns:
+                        bins = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+                        for length in results['path_length']:
+                            for bin_val in sorted(bins.keys()):
+                                if length <= bin_val:
+                                    bins[bin_val] += 1
+                                    break
+                        processed_results['path_length_distribution'] = bins
+                    else:
+                        processed_results['path_length_distribution'] = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+                else:
+                    processed_results = results
+                    # Make sure we have scan_data and files_df keys for consistency
+                    if 'scan_data' not in processed_results and 'files_df' in processed_results:
+                        processed_results['scan_data'] = processed_results['files_df']
+                    elif 'files_df' not in processed_results and 'scan_data' in processed_results:
+                        processed_results['files_df'] = processed_results['scan_data']
+                
+                # Update the dashboard with the processed results
+                self.dashboard_tab.update_with_results(processed_results)
+                
+                # Update analysis tab
+                if hasattr(self.analysis_tab, 'update_data_view'):
+                    self.analysis_tab.update_data_view(processed_results)
+                
+                # Update File Analysis tab
+                if hasattr(self.file_analysis_tab, 'update_with_results'):
+                    self.file_analysis_tab.update_with_results(processed_results)
+                
+                # Switch to dashboard tab
+                self.tabs.setCurrentIndex(0)
             
-            # Update Analysis tab with enhanced data view
-            if hasattr(self.analysis_tab, 'update_data_view'):
-                self.analysis_tab.update_data_view(results)
-            
-            # Update File Analysis tab with results (NEW)
-            if hasattr(self.file_analysis_tab, 'update_with_results'):
-                self.file_analysis_tab.update_with_results(results)
-            
-            # Switch to dashboard tab
-            self.tabs.setCurrentIndex(0)
+            except Exception as e:
+                logging.error(f"Error processing scan results: {str(e)}")
+                QMessageBox.warning(self, "Error", f"Error processing scan results: {str(e)}")
+        
+        def error_callback(error_msg):
+            self.progress_bar.setVisible(False)
+            self.scan_button.setEnabled(True)
+            self.statusBar.showMessage("Scan failed")
+            QMessageBox.critical(self, "Error", f"Failed to start scan: {error_msg}")
         
         # Start scan with callbacks
         try:
@@ -482,36 +312,43 @@ class MainWindow(QMainWindow):
                 source,
                 callbacks={
                     'progress': progress_callback,
-                    'scan_completed': completion_callback
+                    'scan_completed': completion_callback,
+                    'error': error_callback
                 }
             )
             
         except Exception as e:
-            self.progress_bar.setVisible(False)
-            self.scan_button.setEnabled(True)
-            self.statusBar.showMessage("Scan failed")
-            QMessageBox.critical(self, "Error", f"Failed to start scan: {str(e)}")
+            error_callback(str(e))
     
     def export_report(self):
         """Export the current scan results"""
         current_tab = self.tabs.currentIndex()
         
-        if current_tab == 1 and hasattr(self.analysis_tab, 'enhanced_view') and hasattr(self.analysis_tab.enhanced_view, 'show_export_menu'):
+        if current_tab == 1 and hasattr(self, 'enhanced_view'):
             # Analysis tab export
-            self.analysis_tab.enhanced_view.show_export_menu()
-        elif current_tab == 2 and hasattr(self.file_analysis_tab, 'file_analysis_view') and hasattr(self.file_analysis_tab.file_analysis_view, 'show_export_menu'):
-            # File Analysis tab export (NEW)
-            self.file_analysis_tab.file_analysis_view.show_export_menu()
+            self.enhanced_view.export_data()
+        elif current_tab == 2 and hasattr(self.file_analysis_tab, 'export_results'):
+            # File Analysis tab export
+            self.file_analysis_tab.export_results()
         else:
             QMessageBox.information(self, "Export", "No data available to export or export not supported in this tab.")
     
-    def go_to_analysis(self):
-        """Switch to the Analysis tab"""
-        self.tabs.setCurrentIndex(1)  # Assuming Analysis is the second tab
+    def go_to_settings(self):
+        """Switch to the Settings tab"""
+        self.tabs.setCurrentIndex(4)  # Assuming Settings is the fifth tab
     
-    def go_to_file_analysis(self):
-        """Switch to the File Analysis tab (NEW)"""
-        self.tabs.setCurrentIndex(2)  # Assuming File Analysis is the third tab
+    def go_to_migration(self):
+        """Switch to the Migration tab"""
+        self.tabs.setCurrentIndex(3)  # Assuming Migration is the fourth tab
+    
+    def on_settings_changed(self, settings):
+        """Handle settings changes from settings widget"""
+        # Pass settings to the migration tab
+        if hasattr(self.migration_tab, 'on_settings_changed'):
+            self.migration_tab.on_settings_changed(settings)
+        
+        # Store settings
+        self.current_settings = settings
     
     def show_about(self):
         """Show about dialog"""
@@ -519,11 +356,15 @@ class MainWindow(QMainWindow):
             self,
             "About SharePoint Migration Tool",
             "<h2>SharePoint Migration Tool</h2>"
-            "<p>Version 1.1.0</p>"
+            "<p>Version 1.2.0</p>"
             "<p>A tool for cleaning and preparing file systems for SharePoint migration.</p>"
-            "<p>© 2025 CozyFerret</p>"
-            "<p><a href='https://github.com/CozyFerret/sharepoint-migration-tool'>"
-            "https://github.com/CozyFerret/sharepoint-migration-tool</a></p>"
+            "<p>Added new features:</p>"
+            "<ul>"
+            "<li>Destructive/Non-destructive operation modes</li>"
+            "<li>Direct SharePoint upload option</li>"
+            "<li>Advanced settings management</li>"
+            "</ul>"
+            "<p>© 2025 Shareit</p>"
         )
     
     def load_settings(self):
@@ -532,6 +373,10 @@ class MainWindow(QMainWindow):
         geometry = settings.value("MainWindow/geometry")
         if geometry:
             self.restoreGeometry(geometry)
+        
+        # Get current settings from settings widget
+        if hasattr(self, 'settings_widget'):
+            self.current_settings = self.settings_widget.get_current_settings()
     
     def save_settings(self):
         """Save application settings"""

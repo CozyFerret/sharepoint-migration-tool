@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-Data processor for SharePoint Data Migration Cleanup Tool.
-Integrates scanning, analysis, and cleaning operations.
+Enhanced Data Processor for SharePoint Migration Cleanup Tool.
+Supports both destructive and non-destructive operations with extended options.
 """
 
 import os
@@ -11,17 +8,22 @@ import logging
 import tempfile
 import pandas as pd
 import threading
+import shutil
+from pathlib import Path
 
 from core.scanner import Scanner
 from core.analyzers.name_validator import SharePointNameValidator
 from core.analyzers.path_analyzer import PathAnalyzer
 from core.analyzers.duplicate_finder import DuplicateFinder
 from core.analyzers.pii_detector import PIIDetector
+from core.fixers.name_fixer import NameFixer
+from core.fixers.path_shortener import PathShortener
+from core.fixers.deduplicator import Deduplicator
 
 logger = logging.getLogger('sharepoint_migration_tool')
 
 class DataProcessor:
-    """Integrates scanning, analysis, and cleaning operations"""
+    """Integrates scanning, analysis, and cleaning operations with extended options"""
     
     def __init__(self, config=None):
         """
@@ -39,6 +41,11 @@ class DataProcessor:
         self.duplicate_finder = DuplicateFinder(self.config)
         self.pii_detector = PIIDetector(self.config)
         
+        # Initialize fixers
+        self.name_fixer = NameFixer(self.config)
+        self.path_shortener = PathShortener(self.config)
+        self.deduplicator = Deduplicator(self.config)
+        
         # Store state
         self.scan_data = None
         self.analysis_results = {}
@@ -47,6 +54,7 @@ class DataProcessor:
         # Thread tracking
         self.scan_thread = None
         self.analysis_thread = None
+        self.cleaning_thread = None
         
     def start_scan(self, root_path, scan_options=None, callbacks=None):
         """
@@ -94,9 +102,79 @@ class DataProcessor:
         # Store the full dataset in the analysis results
         self.analysis_results['all_files'] = self.scan_data
         
-        # Invoke the callback
+        # Create a complete results dictionary that contains both the original data
+        # and the processed data needed by UI components
+        complete_results = {}
+        
+        # First add raw scan data
+        if isinstance(results, dict):
+            complete_results.update(results)
+        
+        # Add processed dataframe data
+        complete_results['scan_data'] = self.scan_data  
+        complete_results['files_df'] = self.scan_data    # Alternative name some components might expect
+        
+        # Make sure file_types is present and populated
+        if 'file_types' not in complete_results or not complete_results['file_types']:
+            # Create file types mapping from scan_data
+            file_types = {}
+            for _, row in self.scan_data.iterrows():
+                ext = ''
+                if 'extension' in row:
+                    ext = row['extension']
+                elif 'filename' in row:
+                    ext = os.path.splitext(row['filename'])[1].lower()
+                elif 'name' in row:
+                    ext = os.path.splitext(row['name'])[1].lower()
+                    
+                if ext not in file_types:
+                    file_types[ext] = 0
+                file_types[ext] += 1
+            complete_results['file_types'] = file_types
+        
+        # Make sure path_length_distribution is present and populated
+        if 'path_length_distribution' not in complete_results or not complete_results['path_length_distribution']:
+            # Create path length distribution
+            path_lengths = {50: 0, 100: 0, 150: 0, 200: 0, 250: 0, 300: 0}
+            for _, row in self.scan_data.iterrows():
+                length = 0
+                if 'path_length' in row:
+                    length = row['path_length']
+                elif 'path' in row:
+                    length = len(row['path'])
+                elif 'full_path' in row:
+                    length = len(row['full_path'])
+                    
+                for bin_val in sorted(path_lengths.keys()):
+                    if length <= bin_val:
+                        path_lengths[bin_val] += 1
+                        break
+            complete_results['path_length_distribution'] = path_lengths
+        
+        # Ensure we have counts for metrics
+        if 'total_files' not in complete_results:
+            complete_results['total_files'] = len(self.scan_data)
+        if 'total_folders' not in complete_results:
+            # Cannot determine easily from DataFrame, set placeholder
+            complete_results['total_folders'] = results.get('total_folders', 0) if isinstance(results, dict) else 0
+        if 'total_size' not in complete_results:
+            complete_results['total_size'] = self.scan_data['size'].sum() if 'size' in self.scan_data.columns else 0
+        if 'avg_path_length' not in complete_results:
+            if 'path_length' in self.scan_data.columns:
+                complete_results['avg_path_length'] = int(self.scan_data['path_length'].mean())
+            else:
+                complete_results['avg_path_length'] = 0
+        if 'max_path_length' not in complete_results:
+            if 'path_length' in self.scan_data.columns:
+                complete_results['max_path_length'] = int(self.scan_data['path_length'].max())
+            else:
+                complete_results['max_path_length'] = 0
+        if 'total_issues' not in complete_results:
+            complete_results['total_issues'] = self.scan_data['issue_count'].sum() if 'issue_count' in self.scan_data.columns else 0
+        
+        # Invoke the callback with the fully populated results
         if callback:
-            callback(self.scan_data)
+            callback(complete_results)
     
     def _process_scan_results(self, results):
         """
@@ -194,7 +272,7 @@ class DataProcessor:
             
             if callbacks.get('error'):
                 callbacks['error'](str(e))
-            
+    
     def _analyze_name_issues(self, callback=None):
         """
         Analyze file names for SharePoint compatibility
@@ -283,57 +361,511 @@ class DataProcessor:
         except Exception as e:
             logger.error(f"Error analyzing PII: {e}")
     
-    def start_cleaning(self, target_folder, clean_options, callbacks=None):
+    def start_cleaning(self, source_dir, target_dir, clean_options=None, callbacks=None):
         """
         Start cleaning data based on analysis results
         
         Args:
-            target_folder (str): Target folder for cleaned files
+            source_dir (str): Source directory with original files
+            target_dir (str): Target directory for cleaned files (not used in destructive mode)
             clean_options (dict): Options controlling cleaning behavior
             callbacks (dict): Dictionary of callback functions
         """
-        if not self.analysis_results:
-            logger.warning("No analysis results to process")
-            return
+        # Default clean options
+        if clean_options is None:
+            clean_options = {
+                'fix_names': True,
+                'fix_paths': True,
+                'remove_duplicates': False,
+                'destructive_mode': False,
+                'preserve_timestamps': True,
+                'ignore_hidden': True
+            }
             
         # Default callbacks
         if callbacks is None:
             callbacks = {}
         
-        # Import DataCleaner here to avoid circular imports
-        from core.data_cleaner import DataCleaner
-        
-        # Create data cleaner
-        data_cleaner = DataCleaner(self.config)
-        
-        # Start the cleaning process
-        data_cleaner.start_cleaning(
-            self.analysis_results,
-            target_folder,
-            clean_options,
-            progress_callback=callbacks.get('progress'),
-            status_callback=callbacks.get('status'),
-            error_callback=callbacks.get('error'),
-            file_processed_callback=callbacks.get('file_processed'),
-            finished_callback=lambda cleaned_files: self._cleaning_completed(cleaned_files, callbacks.get('cleaning_completed'))
-        )
-        
-        # Store reference to data cleaner
-        self.data_cleaner = data_cleaner
+        # Set source directory for scanning if not already done
+        if self.scan_data is None:
+            self.start_scan(source_dir, callbacks={
+                'scan_completed': lambda results: self.analyze_data(callbacks={
+                    'analysis_completed': lambda analysis_results: self._start_cleaning_process(
+                        source_dir, target_dir, clean_options, callbacks
+                    )
+                })
+            })
+        else:
+            # Start cleaning process directly
+            self._start_cleaning_process(source_dir, target_dir, clean_options, callbacks)
     
-    def _cleaning_completed(self, cleaned_files, callback=None):
+    def _start_cleaning_process(self, source_dir, target_dir, clean_options, callbacks):
         """
-        Handle cleaning completion
+        Start the actual cleaning process after scanning and analysis
         
         Args:
-            cleaned_files (dict): Dictionary mapping original paths to cleaned paths
-            callback (function): Callback to invoke after processing
+            source_dir (str): Source directory with original files
+            target_dir (str): Target directory for cleaned files (not used in destructive mode)
+            clean_options (dict): Options controlling cleaning behavior
+            callbacks (dict): Dictionary of callback functions
         """
-        self.cleaned_files = cleaned_files
+        # Check if we're in destructive mode
+        destructive_mode = clean_options.get('destructive_mode', False)
         
-        # Invoke the callback
-        if callback:
-            callback(cleaned_files)
+        if destructive_mode:
+            logger.warning("Running in destructive mode - original files will be modified")
+            # In destructive mode, we don't need a target directory (modifications are in-place)
+            
+            # Log a warning message about destructive operations
+            logger.warning("DESTRUCTIVE MODE: Original files will be modified directly")
+            
+            # Check source directory exists
+            if not os.path.isdir(source_dir):
+                error_msg = f"Source directory does not exist: {source_dir}"
+                logger.error(error_msg)
+                if 'error' in callbacks:
+                    callbacks['error'](error_msg)
+                return
+        else:
+            # Non-destructive mode, check target directory
+            if not target_dir:
+                error_msg = "Target directory not specified for non-destructive mode"
+                logger.error(error_msg)
+                if 'error' in callbacks:
+                    callbacks['error'](error_msg)
+                return
+                
+            # Create target directory if it doesn't exist
+            os.makedirs(target_dir, exist_ok=True)
+        
+        # Start the cleaning thread
+        self.cleaning_thread = threading.Thread(
+            target=self._cleaning_thread,
+            args=(source_dir, target_dir, clean_options, callbacks)
+        )
+        self.cleaning_thread.daemon = True
+        self.cleaning_thread.start()
+    
+    def _cleaning_thread(self, source_dir, target_dir, clean_options, callbacks):
+        """
+        Thread for running the cleaning process
+        
+        Args:
+            source_dir (str): Source directory with original files
+            target_dir (str): Target directory for cleaned files (not used in destructive mode)
+            clean_options (dict): Options controlling cleaning behavior
+            callbacks (dict): Dictionary of callback functions
+        """
+        try:
+            # Check if we need to perform analysis
+            if not self.analysis_results:
+                logger.info("No analysis results found, running analysis")
+                
+                # Perform analysis first
+                self.analyze_data(callbacks={
+                    'analysis_completed': lambda results: self._perform_cleaning(
+                        source_dir, target_dir, clean_options, callbacks
+                    )
+                })
+            else:
+                # Perform cleaning directly
+                self._perform_cleaning(source_dir, target_dir, clean_options, callbacks)
+                
+        except Exception as e:
+            logger.error(f"Error in cleaning thread: {e}")
+            
+            if 'error' in callbacks:
+                callbacks['error'](str(e))
+    
+    def _perform_cleaning(self, source_dir, target_dir, clean_options, callbacks):
+        """
+        Perform the actual cleaning operations
+        
+        Args:
+            source_dir (str): Source directory with original files
+            target_dir (str): Target directory for cleaned files (not used in destructive mode)
+            clean_options (dict): Options controlling cleaning behavior
+            callbacks (dict): Dictionary of callback functions
+        """
+        logger.info("Starting cleaning operations")
+        
+        # Extract options
+        fix_names = clean_options.get('fix_names', True)
+        fix_paths = clean_options.get('fix_paths', True)
+        remove_duplicates = clean_options.get('remove_duplicates', False)
+        destructive_mode = clean_options.get('destructive_mode', False)
+        preserve_timestamps = clean_options.get('preserve_timestamps', True)
+        ignore_hidden = clean_options.get('ignore_hidden', True)
+        
+        # Progress tracking
+        total_files = len(self.scan_data) if self.scan_data is not None else 0
+        processed_files = 0
+        issues_fixed = 0
+        
+        # Check if we have issues to fix
+        have_name_issues = 'name_issues' in self.analysis_results and len(self.analysis_results['name_issues']) > 0
+        have_path_issues = 'path_issues' in self.analysis_results and len(self.analysis_results['path_issues']) > 0
+        have_duplicates = 'duplicates' in self.analysis_results and len(self.analysis_results['duplicates']) > 0
+        
+        # Update initial progress
+        if 'progress' in callbacks:
+            callbacks['progress'](processed_files, total_files)
+        
+        # Process files
+        try:
+            # Get list of files to process
+            files_to_process = []
+            
+            if self.scan_data is not None:
+                for _, row in self.scan_data.iterrows():
+                    # Skip folders
+                    if row.get('is_folder', False):
+                        continue
+                    
+                    # Skip hidden files if requested
+                    if ignore_hidden and os.path.basename(row['path']).startswith('.'):
+                        continue
+                    
+                    files_to_process.append(row['path'])
+            
+            # Update total for progress tracking
+            total_files = len(files_to_process)
+            
+            # Process each file
+            for file_path in files_to_process:
+                # Check if the file exists
+                if not os.path.exists(file_path):
+                    logger.warning(f"File not found: {file_path}")
+                    continue
+                
+                # Check if this file has issues
+                has_name_issue = have_name_issues and file_path in self.analysis_results['name_issues']['path'].values
+                has_path_issue = have_path_issues and file_path in self.analysis_results['path_issues']['path'].values
+                is_duplicate = have_duplicates and file_path in self.analysis_results['duplicates']['path'].values
+                
+                needs_fixing = (fix_names and has_name_issue) or (fix_paths and has_path_issue) or (remove_duplicates and is_duplicate)
+                
+                # Skip if no issues to fix
+                if not needs_fixing:
+                    # In non-destructive mode, we still need to copy the file
+                    if not destructive_mode:
+                        # Create target path
+                        rel_path = os.path.relpath(file_path, source_dir)
+                        dest_path = os.path.join(target_dir, rel_path)
+                        
+                        # Create target directory
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        
+                        # Copy the file
+                        shutil.copy2(file_path, dest_path)
+                        
+                        # Store in cleaned files
+                        self.cleaned_files[file_path] = dest_path
+                
+                # Fix issues if needed
+                elif destructive_mode:
+                    # Destructive mode - fix in place
+                    fixed = False
+                    
+                    # Fix name issues
+                    if fix_names and has_name_issue:
+                        new_name = self.name_fixer.fix_name(os.path.basename(file_path))
+                        if new_name != os.path.basename(file_path):
+                            # Create new path
+                            new_path = os.path.join(os.path.dirname(file_path), new_name)
+                            
+                            # Rename the file
+                            os.rename(file_path, new_path)
+                            logger.info(f"Renamed: {file_path} -> {new_path}")
+                            
+                            # Update file_path for subsequent operations
+                            file_path = new_path
+                            fixed = True
+                            issues_fixed += 1
+                    
+                    # Fix path issues
+                    if fix_paths and has_path_issue:
+                        if len(file_path) > 256:  # SharePoint limit
+                            # Create shortened path
+                            shortened_path = self.path_shortener.shorten_path(file_path)
+                            
+                            if shortened_path != file_path:
+                                # Create target directory
+                                os.makedirs(os.path.dirname(shortened_path), exist_ok=True)
+                                
+                                # Move the file
+                                shutil.move(file_path, shortened_path)
+                                logger.info(f"Shortened path: {file_path} -> {shortened_path}")
+                                
+                                # Update file_path for subsequent operations
+                                file_path = shortened_path
+                                fixed = True
+                                issues_fixed += 1
+                    
+                    # Handle duplicates
+                    if remove_duplicates and is_duplicate:
+                        # Find the original in the duplicate group
+                        duplicate_group = self.analysis_results['duplicates'][
+                            self.analysis_results['duplicates']['path'] == file_path
+                        ]
+                        
+                        if not duplicate_group.empty:
+                            group_id = duplicate_group.iloc[0]['duplicate_group']
+                            group_files = self.analysis_results['duplicates'][
+                                self.analysis_results['duplicates']['duplicate_group'] == group_id
+                            ]
+                            
+                            # Find the original file (usually the first in the group)
+                            original_file = None
+                            for _, row in group_files.iterrows():
+                                if row['is_original']:
+                                    original_file = row['path']
+                                    break
+                            
+                            # If this is not the original and we found the original
+                            if not duplicate_group.iloc[0]['is_original'] and original_file:
+                                # Check if the original exists
+                                if os.path.exists(original_file):
+                                    # Remove the duplicate
+                                    os.remove(file_path)
+                                    logger.info(f"Removed duplicate: {file_path} (original: {original_file})")
+                                    fixed = True
+                                    issues_fixed += 1
+                    
+                    # Store in cleaned files map if any fixes were applied
+                    if fixed:
+                        self.cleaned_files[file_path] = file_path
+                
+                else:
+                    # Non-destructive mode - create fixed copy
+                    fixed_path = file_path
+                    fixed = False
+                    
+                    # Fix name issues
+                    if fix_names and has_name_issue:
+                        name_without_ext, ext = os.path.splitext(os.path.basename(fixed_path))
+                        fixed_name = self.name_fixer.fix_name(name_without_ext) + ext
+                        if fixed_name != os.path.basename(fixed_path):
+                            # Update the path
+                            fixed_path = os.path.join(os.path.dirname(fixed_path), fixed_name)
+                            fixed = True
+                            issues_fixed += 1
+                    
+                    # Fix path issues
+                    if fix_paths and has_path_issue:
+                        if len(fixed_path) > 256:  # SharePoint limit
+                            # Create shortened path relative to target directory
+                            rel_path = os.path.relpath(fixed_path, source_dir)
+                            target_path = os.path.join(target_dir, rel_path)
+                            
+                            if len(target_path) > 256:
+                                shortened_path = self.path_shortener.shorten_path(target_path)
+                                fixed_path = shortened_path
+                                fixed = True
+                                issues_fixed += 1
+                    
+                    # Create relative path for copying
+                    rel_path = os.path.relpath(file_path, source_dir)
+                    
+                    # Handle duplicates
+                    skip_copy = False
+                    if remove_duplicates and is_duplicate:
+                        # Find the original in the duplicate group
+                        duplicate_group = self.analysis_results['duplicates'][
+                            self.analysis_results['duplicates']['path'] == file_path
+                        ]
+                        
+                        if not duplicate_group.empty:
+                            # Skip if this is not the original file
+                            if not duplicate_group.iloc[0]['is_original']:
+                                skip_copy = True
+                                fixed = True
+                                issues_fixed += 1
+                    
+                    if not skip_copy:
+                        # Determine target path
+                        if fixed:
+                            # Use the fixed path
+                            dest_path = fixed_path
+                        else:
+                            # Create default target path
+                            dest_path = os.path.join(target_dir, rel_path)
+                        
+                        # Create target directory
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        
+                        # Copy the file
+                        if preserve_timestamps:
+                            shutil.copy2(file_path, dest_path)
+                        else:
+                            shutil.copy(file_path, dest_path)
+                        
+                        # Store in cleaned files
+                        self.cleaned_files[file_path] = dest_path
+                
+                # Update progress
+                processed_files += 1
+                if 'progress' in callbacks and processed_files % 10 == 0:  # Update every 10 files
+                    callbacks['progress'](processed_files, total_files)
+            
+            # Final progress update
+            if 'progress' in callbacks:
+                callbacks['progress'](processed_files, total_files)
+            
+            # Call completion callback
+            if 'cleaning_completed' in callbacks:
+                result = {
+                    'success': True,
+                    'total_processed': processed_files,
+                    'issues_fixed': issues_fixed,
+                    'destructive_mode': destructive_mode
+                }
+                callbacks['cleaning_completed'](result)
+                
+        except Exception as e:
+            logger.error(f"Error during cleaning: {e}")
+            
+            if 'error' in callbacks:
+                callbacks['error'](str(e))
+    
+    def clean_and_upload(self, source_dir, sharepoint_config, clean_options=None, callbacks=None):
+        """
+        Clean data and upload directly to SharePoint
+        
+        Args:
+            source_dir (str): Source directory with original files
+            sharepoint_config (dict): SharePoint configuration
+            clean_options (dict): Options controlling cleaning behavior
+            callbacks (dict): Dictionary of callback functions
+        """
+        # Default clean options
+        if clean_options is None:
+            clean_options = {
+                'fix_names': True,
+                'fix_paths': True,
+                'remove_duplicates': False,
+                'destructive_mode': False,
+                'preserve_timestamps': True,
+                'ignore_hidden': True
+            }
+            
+        # Default callbacks
+        if callbacks is None:
+            callbacks = {}
+        
+        # Create a temporary directory for cleaned files (if not in destructive mode)
+        if not clean_options.get('destructive_mode', False):
+            temp_dir = tempfile.mkdtemp(prefix="sharepoint_migration_")
+        else:
+            # In destructive mode, modifications happen in-place
+            temp_dir = None
+        
+        logger.info(f"Starting clean and upload: {'Destructive' if clean_options.get('destructive_mode', False) else 'Non-destructive'} mode")
+        
+        # Define callbacks for cleaning process
+        def cleaning_completed(result):
+            logger.info(f"Cleaning completed: {result}")
+            
+            # Only upload if cleaning was successful
+            if result.get('success', False):
+                self._upload_to_sharepoint(
+                    source_dir, 
+                    temp_dir,
+                    sharepoint_config, 
+                    clean_options,
+                    callbacks
+                )
+            else:
+                if 'cleaning_completed' in callbacks:
+                    callbacks['cleaning_completed'](result)
+        
+        # Start cleaning process
+        if temp_dir:
+            # Non-destructive mode - clean to temp directory then upload
+            self.start_cleaning(
+                source_dir=source_dir,
+                target_dir=temp_dir,
+                clean_options=clean_options,
+                callbacks={
+                    'progress': callbacks.get('progress'),
+                    'error': callbacks.get('error'),
+                    'cleaning_completed': cleaning_completed
+                }
+            )
+        else:
+            # Destructive mode - clean in place then upload
+            self.start_cleaning(
+                source_dir=source_dir,
+                target_dir=None,  # No target dir in destructive mode
+                clean_options=clean_options,
+                callbacks={
+                    'progress': callbacks.get('progress'),
+                    'error': callbacks.get('error'),
+                    'cleaning_completed': cleaning_completed
+                }
+            )
+    
+    def _upload_to_sharepoint(self, source_dir, temp_dir, sharepoint_config, clean_options, callbacks):
+        """
+        Upload cleaned files to SharePoint
+        
+        Args:
+            source_dir (str): Original source directory
+            temp_dir (str): Temporary directory with cleaned files (None in destructive mode)
+            sharepoint_config (dict): SharePoint configuration
+            clean_options (dict): Options controlling cleaning behavior
+            callbacks (dict): Dictionary of callback functions
+        """
+        logger.info("Starting SharePoint upload")
+        
+        # Extract SharePoint configuration
+        sp_integration = sharepoint_config.get('integration')
+        target_library = sharepoint_config.get('library')
+        
+        if not sp_integration or not target_library:
+            error_msg = "Missing SharePoint integration or target library"
+            logger.error(error_msg)
+            
+            if 'error' in callbacks:
+                callbacks['error'](error_msg)
+            return
+        
+        # In destructive mode, upload from the original source
+        # In non-destructive mode, upload from the temp directory
+        upload_from_dir = source_dir if clean_options.get('destructive_mode', False) else temp_dir
+        
+        try:
+            # Start the upload
+            upload_success, upload_issues, upload_stats = sp_integration.upload_directory(
+                upload_from_dir, target_library
+            )
+            
+            # Create result
+            result = {
+                'success': upload_success,
+                'issues': upload_issues,
+                'stats': upload_stats,
+                'destructive_mode': clean_options.get('destructive_mode', False)
+            }
+            
+            # Call completion callback
+            if 'cleaning_completed' in callbacks:
+                callbacks['cleaning_completed'](result)
+                
+        except Exception as e:
+            logger.error(f"Error during SharePoint upload: {e}")
+            
+            if 'error' in callbacks:
+                callbacks['error'](str(e))
+        
+        finally:
+            # Clean up the temporary directory if one was created
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                    logger.info(f"Removed temporary directory: {temp_dir}")
+                except Exception as e:
+                    logger.warning(f"Error removing temporary directory: {e}")
     
     def stop_scanning(self):
         """Stop an ongoing scan"""
@@ -342,8 +874,8 @@ class DataProcessor:
     
     def stop_cleaning(self):
         """Stop an ongoing cleaning operation"""
-        if hasattr(self, 'data_cleaner') and self.data_cleaner:
-            self.data_cleaner.stop_cleaning()
+        # Set a flag to stop the cleaning thread
+        self._stop_cleaning = True
     
     def get_scan_data(self):
         """
@@ -371,67 +903,3 @@ class DataProcessor:
             dict: Dictionary mapping original paths to cleaned paths
         """
         return self.cleaned_files
-    
-    def clean_and_upload(self, clean_options, sharepoint_config, callbacks=None):
-        """
-        Clean data and upload directly to SharePoint
-        
-        Args:
-            clean_options (dict): Options controlling cleaning behavior
-            sharepoint_config (dict): SharePoint configuration
-            callbacks (dict): Dictionary of callback functions
-            
-        This is a placeholder for the automatic mode
-        """
-        # Create a temporary directory for cleaned files
-        temp_dir = tempfile.mkdtemp(prefix="sharepoint_migration_")
-        logger.info(f"Created temporary directory: {temp_dir}")
-        
-        # Default callbacks
-        if callbacks is None:
-            callbacks = {}
-        
-        # Create a custom completion callback to handle upload
-        def cleaning_completed(cleaned_files):
-            self._upload_to_sharepoint(
-                cleaned_files, 
-                sharepoint_config, 
-                callbacks
-            )
-        
-        # Start the cleaning process
-        self.start_cleaning(
-            temp_dir,
-            clean_options,
-            {
-                'progress': callbacks.get('progress'),
-                'status': callbacks.get('status'),
-                'error': callbacks.get('error'),
-                'file_processed': callbacks.get('file_processed'),
-                'cleaning_completed': cleaning_completed
-            }
-        )
-    
-    def _upload_to_sharepoint(self, cleaned_files, sharepoint_config, callbacks):
-        """
-        Upload cleaned files to SharePoint
-        
-        Args:
-            cleaned_files (dict): Dictionary mapping original paths to cleaned paths
-            sharepoint_config (dict): SharePoint configuration
-            callbacks (dict): Dictionary of callback functions
-            
-        This is a placeholder for the SharePoint upload functionality
-        """
-        logger.info("SharePoint upload is a placeholder in this version")
-        
-        # Store the cleaned files
-        self.cleaned_files = cleaned_files
-        
-        # Simulate completion
-        if callbacks.get('cleaning_completed'):
-            callbacks['cleaning_completed'](cleaned_files)
-        
-        # Simulate upload completion
-        if callbacks.get('upload_completed'):
-            callbacks['upload_completed'](cleaned_files)

@@ -7,4 +7,4 @@ Contains components for interacting with external systems like SharePoint.
 """
 
 # Import main components for easy access
-from infrastructure.sharepoint import SharePointAuth, SharePointUploader, SharePointUploadManager
+from infrastructure.sharepoint import SharePointIntegration

@@ -7,21 +7,33 @@ import logging
 import os
 import shutil
 import tempfile
+import traceback
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-from office365.runtime.auth.authentication_context import AuthenticationContext
-from office365.sharepoint.client_context import ClientContext
-from office365.sharepoint.files.file import File
-from office365.sharepoint.folders.folder import Folder
-
-from core.data_cleaner import DataCleaner
-from core.analyzers.name_validator import NameValidator
-from core.analyzers.path_analyzer import PathAnalyzer
-from core.fixers.name_fixer import NameFixer
-from core.fixers.path_shortener import PathShortener
-
+# Get logger for this module
 logger = logging.getLogger(__name__)
+
+try:
+    from office365.runtime.auth.authentication_context import AuthenticationContext
+    from office365.sharepoint.client_context import ClientContext
+    from office365.sharepoint.files.file import File
+    from office365.sharepoint.folders.folder import Folder
+except ImportError as e:
+    logger.critical(f"Failed to import SharePoint dependencies: {e}")
+    logger.critical(traceback.format_exc())
+    raise
+
+try:
+    from core.data_cleaner import DataCleaner
+    from core.analyzers.name_validator import SharePointNameValidator
+    from core.analyzers.path_analyzer import PathAnalyzer
+    from core.fixers.name_fixer import NameFixer
+    from core.fixers.path_shortener import PathShortener
+except ImportError as e:
+    logger.critical(f"Failed to import core components: {e}")
+    logger.critical(traceback.format_exc())
+    raise
 
 class SharePointIntegration:
     """
@@ -29,10 +41,16 @@ class SharePointIntegration:
     """
     
     def __init__(self):
-        self.ctx = None  # SharePoint context
-        self.site_url = None
-        self.temp_dir = None  # Temporary directory for cleaned files
-        self.data_cleaner = DataCleaner()
+        try:
+            self.ctx = None  # SharePoint context
+            self.site_url = None
+            self.temp_dir = None  # Temporary directory for cleaned files
+            self.data_cleaner = DataCleaner()
+            logger.debug("SharePointIntegration initialized")
+        except Exception as e:
+            logger.critical(f"Failed to initialize SharePointIntegration: {e}")
+            logger.critical(traceback.format_exc())
+            raise
         
     def authenticate(self, site_url: str, username: str, password: str) -> bool:
         """
@@ -63,7 +81,7 @@ class SharePointIntegration:
             logger.error(f"Authentication error: {str(e)}")
             return False
             
-    def authenticate_modern(self, site_url: str, client_id: str, client_secret: str) -> bool:
+    def authenticate_app_only(self, site_url: str, client_id: str, client_secret: str) -> bool:
         """
         Authenticate with SharePoint using modern authentication (app-only)
         
@@ -122,7 +140,7 @@ class SharePointIntegration:
             fixers = []
             
             if fix_names:
-                analyzers.append(NameValidator())
+                analyzers.append(SharePointNameValidator())
                 fixers.append(NameFixer())
                 
             if fix_paths:
@@ -214,6 +232,22 @@ class SharePointIntegration:
             # Clean up the temporary directory
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
+    
+    def upload_directory(self, local_dir: str, target_library: str) -> Tuple[bool, List[str], Dict]:
+        """
+        Upload a directory to SharePoint recursively
+        
+        Args:
+            local_dir: Local directory path to upload
+            target_library: Target SharePoint document library
+            
+        Returns:
+            Tuple containing:
+                bool: Success indicator
+                List[str]: List of issues encountered
+                Dict: Dictionary with upload statistics
+        """
+        return self._upload_directory(local_dir, target_library)
                 
     def _upload_directory(self, local_dir: str, target_library: str) -> Tuple[bool, List[str], Dict]:
         """
